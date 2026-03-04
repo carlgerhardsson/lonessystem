@@ -1,20 +1,21 @@
 // 🧪 Global testsetup
-// Körs före varje testfil
+// Mockar localStorage för node-miljö (finns inte inbyggt i Node)
 
-import '@testing-library/jest-dom'
+const store: Record<string, string> = {}
 
-// Mocka localStorage globalt
-const localStorageMock = (() => {
-  let store: Record<string, string> = {}
-  return {
-    getItem:    (key: string) => store[key] ?? null,
-    setItem:    (key: string, value: string) => { store[key] = value },
-    removeItem: (key: string) => { delete store[key] },
-    clear:      () => { store = {} },
-  }
-})()
+const localStorageMock = {
+  getItem:    (key: string) => store[key] ?? null,
+  setItem:    (key: string, value: string) => { store[key] = value },
+  removeItem: (key: string) => { delete store[key] },
+  clear:      () => { Object.keys(store).forEach(k => delete store[k]) },
+  length: 0,
+  key: (_i: number) => null,
+}
 
-Object.defineProperty(window, 'localStorage', { value: localStorageMock })
-
-// Mocka window.confirm så tester inte hänger sig
-window.confirm = () => true
+// Gör localStorage tillgänglig globalt i node-miljön
+if (typeof globalThis.localStorage === 'undefined') {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: localStorageMock,
+    writable: true,
+  })
+}
