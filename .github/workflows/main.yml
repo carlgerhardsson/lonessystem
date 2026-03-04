@@ -1,31 +1,110 @@
 name: 🤖 CI/CD Pipeline
 
+# ─── TRIGGRAR ────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main, 'feature/**']
   pull_request:
     branches: [main]
 
+# ─── JOBB ────────────────────────────────────────────────────────────────────
 jobs:
+
+  # ── 1. VALIDERA KONFIGURATION (NY: fångar postcss/config-buggar tidigt) ────
+  validate:
+    name: ✅ Validera konfigfiler
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kontrollera att kritiska filer finns
+        run: |
+          files=(
+            "package.json"
+            "vite.config.ts"
+            "tsconfig.json"
+            "tailwind.config.js"
+            "postcss.config.js"
+            "index.html"
+            "src/main.tsx"
+            "src/App.tsx"
+            "src/engine/calculations.ts"
+            "src/store/index.ts"
+          )
+          missing=0
+          for f in "${files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Saknas: $f"
+              missing=1
+            else
+              echo "✅ Finns: $f"
+            fi
+          done
+          exit $missing
+
+      - name: Kontrollera postcss.config.js innehåll
+        run: |
+          if ! grep -q "tailwindcss" postcss.config.js; then
+            echo "❌ postcss.config.js saknar tailwindcss"
+            exit 1
+          fi
+          if ! grep -q "autoprefixer" postcss.config.js; then
+            echo "❌ postcss.config.js saknar autoprefixer"
+            exit 1
+          fi
+          echo "✅ postcss.config.js ser korrekt ut"
+
+  # ── 2. TESTER (beror på validate — körs aldrig om konfig är trasig) ────────
   test:
     name: 🧪 Tester (TDD)
+    needs: [validate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
       - name: Installera beroenden
         run: npm install
-      - name: Kör alla tester
-        run: npm test
-      - name: Ladda upp testresultat
+      - name: Kör alla tester med coverage
+        run: npm test -- --coverage
+      - name: Ladda upp coverage-rapport
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: coverage-rapport
           path: coverage/
 
+  # ── 3. BYGGVALIDERING (NY: verifiera att koden faktiskt kompileras) ─────────
+  build-check:
+    name: 🔨 Byggvalidering
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm install
+      - name: TypeScript-kompilering
+        run: npx tsc --noEmit
+      - name: Bygg produktionsapp (dist/)
+        run: npm run build
+      - name: Verifiera att dist/ skapades
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "❌ dist/ saknas — bygget misslyckades"
+            exit 1
+          fi
+          if [ ! -f "dist/index.html" ]; then
+            echo "❌ dist/index.html saknas"
+            exit 1
+          fi
+          echo "✅ dist/ skapad och index.html finns"
+          ls -la dist/
+
+  # ── 4. SÄKERHETSSKANNING ────────────────────────────────────────────────────
   security:
     name: 🔒 Säkerhetsskanning
     runs-on: ubuntu-latest
@@ -35,27 +114,26 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
-      - name: Granska paket för säkerhetshål
+      - name: npm audit
         run: npm audit --audit-level=high
         continue-on-error: true
 
-  build:
-    name: 🏗️ Bygg & Deploy
-    needs: [test]
+  # ── 5. DEPLOY (kräver att ALLA ovan är gröna) ─────────────────────────────
+  deploy:
+    name: 🚀 Deploy till GitHub Pages
+    needs: [test, build-check]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
-      pages: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Installera beroenden
-        run: npm install
-      - name: Bygg produktionsapp
+          cache: 'npm'
+      - run: npm install
+      - name: Bygg för produktion
         run: npm run build
       - name: Deploya till GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
@@ -63,3 +141,7 @@ jobs:
           folder: dist
           branch: gh-pages
           clean: true
+      - name: Sammanfattning
+        run: |
+          echo "## 🚀 Deploy klar!" >> $GITHUB_STEP_SUMMARY
+          echo "Appen är live på: https://carlgerhardsson.github.io/lonessystem/" >> $GITHUB_STEP_SUMMARY
