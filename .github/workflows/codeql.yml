@@ -1,0 +1,36 @@
+name: 🔍 CodeQL Säkerhetsanalys
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Kör varje måndag kl 08:00 — fångar nya sårbarheter även utan kodändringar
+    - cron: '0 8 * * 1'
+
+jobs:
+  codeql:
+    name: 🔍 Analysera kod
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initiera CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+
+      - name: Bygg för analys
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Kör CodeQL-analys
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
