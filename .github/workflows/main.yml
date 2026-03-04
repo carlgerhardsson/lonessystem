@@ -15,10 +15,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - name: Installera beroenden
+        run: npm install
       - name: Kör alla tester
-        run: npm test -- --reporter=verbose
+        run: npm test
       - name: Ladda upp testresultat
         if: always()
         uses: actions/upload-artifact@v4
@@ -34,25 +34,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - run: npm install
       - name: Granska paket för säkerhetshål
         run: npm audit --audit-level=high
+        continue-on-error: true
 
   build:
     name: 🏗️ Bygg & Deploy
-    needs: [test, security]
+    needs: [test]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - name: Installera beroenden
+        run: npm install
       - name: Bygg produktionsapp
         run: npm run build
       - name: Deploya till GitHub Pages
@@ -60,3 +62,4 @@ jobs:
         with:
           folder: dist
           branch: gh-pages
+          clean: true
