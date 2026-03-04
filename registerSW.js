@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/lonessystem/sw.js', { scope: '/lonessystem/' })})}
