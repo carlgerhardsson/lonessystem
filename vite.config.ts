@@ -27,5 +27,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
+    // Använd test-specifik tsconfig som inkluderar vitest globals + tests/
+    typecheck: { tsconfig: './tsconfig.test.json' },
   }
 })
