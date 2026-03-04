@@ -4,15 +4,13 @@
 
 import type { Employee, PayrollResult } from '../engine/calculations'
 
-// ─── NYCKELKONSTANTER ────────────────────────────────────────────────────────
-
 const KEYS = {
   EMPLOYEES: 'lonessystem:employees',
   EMPLOYER:  'lonessystem:employer',
   PAYROLL:   'lonessystem:payroll',
 } as const
 
-// ─── ARBETSGIVARINFORMATION ──────────────────────────────────────────────────
+// ─── ARBETSGIVARE ─────────────────────────────────────────────────────────────
 
 export interface Employer {
   orgNr: string
@@ -30,7 +28,7 @@ export const saveEmployer = (employer: Employer): void => {
   localStorage.setItem(KEYS.EMPLOYER, JSON.stringify(employer))
 }
 
-// ─── ANSTÄLLDA ───────────────────────────────────────────────────────────────
+// ─── ANSTÄLLDA ────────────────────────────────────────────────────────────────
 
 export const getEmployees = (): Employee[] => {
   const raw = localStorage.getItem(KEYS.EMPLOYEES)
@@ -53,24 +51,43 @@ export const deleteEmployee = (id: string): void => {
 export const generateId = (): string =>
   `emp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
-// ─── LÖNEHISTORIK ────────────────────────────────────────────────────────────
+// ─── LÖNEHISTORIK ─────────────────────────────────────────────────────────────
 
 export const getPayrollHistory = (): PayrollResult[] => {
   const raw = localStorage.getItem(KEYS.PAYROLL)
   return raw ? JSON.parse(raw) : []
 }
 
+// Gammal funktion — bevarad för bakåtkompatibilitet
 export const savePayrollResult = (result: PayrollResult): void => {
   const history = getPayrollHistory()
   history.push(result)
   localStorage.setItem(KEYS.PAYROLL, JSON.stringify(history))
 }
 
+// NY: Ersätter befintligt resultat för samma anställd+månad (dubblettskydd)
+export const savePayrollResultForMonth = (result: PayrollResult): void => {
+  const history = getPayrollHistory()
+  const idx = history.findIndex(
+    r => r.employeeId === result.employeeId && r.month === result.month
+  )
+  if (idx >= 0) history[idx] = result  // Ersätt befintlig
+  else history.push(result)             // Lägg till ny
+  localStorage.setItem(KEYS.PAYROLL, JSON.stringify(history))
+}
+
+// NY: Ta bort enskild lönespecrad
+export const deletePayrollResult = (employeeId: string, month: string): void => {
+  const history = getPayrollHistory().filter(
+    r => !(r.employeeId === employeeId && r.month === month)
+  )
+  localStorage.setItem(KEYS.PAYROLL, JSON.stringify(history))
+}
+
 export const getPayrollForMonth = (month: string): PayrollResult[] =>
   getPayrollHistory().filter(r => r.month === month)
 
-// ─── EXPORT-BEREDSKAP (FÖRBERED FÖR API-MIGRATION) ──────────────────────────
-// I version 2 ersätts localStorage-anropen med fetch('/api/employees') etc.
+// ─── API-ADAPTER (förbered för v2) ────────────────────────────────────────────
 
 export interface StorageAdapter {
   getEmployees(): Promise<Employee[]>
@@ -79,10 +96,9 @@ export interface StorageAdapter {
   savePayrollResult(r: PayrollResult): Promise<void>
 }
 
-// Lokal adapter (version 1)
 export const localStorageAdapter: StorageAdapter = {
-  getEmployees:     async () => getEmployees(),
-  saveEmployee:     async (e) => saveEmployee(e),
+  getEmployees:      async () => getEmployees(),
+  saveEmployee:      async (e) => saveEmployee(e),
   getPayrollHistory: async () => getPayrollHistory(),
-  savePayrollResult: async (r) => savePayrollResult(r),
+  savePayrollResult: async (r) => savePayrollResultForMonth(r),
 }

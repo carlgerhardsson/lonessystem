@@ -1,4 +1,5 @@
-// 🎨 FRONTEND AGENT — Lönesystem App (bugfix: layout + navigation)
+// 🎨 FRONTEND AGENT — Lönesystem App
+// Ändringar: raderingsknapp på lönespecrader + dubblettskydd vid körning
 
 import { useState, useEffect } from 'react'
 import {
@@ -11,7 +12,8 @@ import {
 } from './engine/calculations'
 import {
   getEmployees, saveEmployee, deleteEmployee, generateId,
-  getEmployer, saveEmployer, getPayrollForMonth, savePayrollResult,
+  getEmployer, saveEmployer, getPayrollForMonth,
+  savePayrollResultForMonth, deletePayrollResult,
   type Employer
 } from './store'
 import { generateAGI, generatePAIN001, generateSIE4, downloadFile } from './engine/exports'
@@ -68,10 +70,11 @@ function NavItem({ icon: Icon, label, active, onClick }: {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
-function DashboardPage({ employees, onRunPayroll, onGoToEmployees }: {
+function DashboardPage({ employees, onRunPayroll, onGoToEmployees, onDeletePayroll }: {
   employees: Employee[]
   onRunPayroll: () => void
   onGoToEmployees: () => void
+  onDeletePayroll: (employeeId: string, month: string) => void
 }) {
   const month = currentMonth()
   const results = getPayrollForMonth(month)
@@ -90,9 +93,9 @@ function DashboardPage({ employees, onRunPayroll, onGoToEmployees }: {
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <StatCard label="Anställda" value={String(employees.length)} sub="aktiva" />
-        <StatCard label="Bruttolön" value={results.length ? kr(totalGross) : '—'} color="blue" />
-        <StatCard label="Nettolön"  value={results.length ? kr(totalNet)   : '—'} color="green" />
+        <StatCard label="Anställda"    value={String(employees.length)} sub="aktiva" />
+        <StatCard label="Bruttolön"    value={results.length ? kr(totalGross) : '—'} color="blue" />
+        <StatCard label="Nettolön"     value={results.length ? kr(totalNet)   : '—'} color="green" />
         <StatCard label="Total kostnad" value={results.length ? kr(totalCost) : '—'} color="amber" sub="inkl. avg." />
       </div>
 
@@ -134,19 +137,40 @@ function DashboardPage({ employees, onRunPayroll, onGoToEmployees }: {
 
           {results.length > 0 && (
             <div className="glass-card p-4">
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest mb-3">Lönespec {month}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest mb-3">
+                Lönespec {month}
+              </p>
               {results.map(r => {
                 const emp = employees.find(e => e.id === r.employeeId)
                 return (
-                  <div key={r.employeeId} className="flex justify-between items-center py-2.5 border-b border-slate-700/50 last:border-0">
-                    <div>
-                      <p className="text-white text-sm font-medium">{emp?.name ?? r.employeeId}</p>
+                  <div
+                    key={r.employeeId}
+                    className="flex justify-between items-center py-3 border-b border-slate-700/50 last:border-0"
+                  >
+                    {/* Namn + brutto */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">{emp?.name ?? r.employeeId}</p>
                       <p className="text-slate-400 text-xs">Brutto: {kr(r.grossSalary)}</p>
                     </div>
-                    <div className="text-right">
+
+                    {/* Netto */}
+                    <div className="text-right mx-3">
                       <p className="text-emerald-400 font-semibold text-sm">{kr(r.netSalary)}</p>
                       <p className="text-slate-500 text-xs">Netto</p>
                     </div>
+
+                    {/* Raderingsknapp */}
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Ta bort lönespec för ${emp?.name ?? r.employeeId}?`)) {
+                          onDeletePayroll(r.employeeId, r.month)
+                        }
+                      }}
+                      style={{ WebkitTapHighlightColor: 'transparent' }}
+                      className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 flex-shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 )
               })}
@@ -187,10 +211,7 @@ function EmployeesPage({ employees, onAdd, onEdit, onDelete }: {
           <Users size={40} className="text-slate-600 mx-auto mb-3" />
           <p className="text-slate-300 font-semibold mb-1">Inga anställda ännu</p>
           <p className="text-slate-500 text-sm mb-5">Tryck på + för att lägga till din första anställde</p>
-          <button
-            onClick={onAdd}
-            className="bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold text-sm"
-          >
+          <button onClick={onAdd} className="bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold text-sm">
             + Lägg till anställd
           </button>
         </div>
@@ -251,9 +272,9 @@ function ReportsPage({ employees, employer }: { employees: Employee[]; employer:
   }
 
   const exports = [
-    { key: 'agi' as const,  icon: FileText,   title: 'AGI – Skatteverket',    sub: 'Arbetsgivardeklaration XML',    color: 'blue' },
-    { key: 'pain' as const, icon: Download,   title: 'PAIN.001 – Bank',       sub: 'Bankfil för utbetalning',       color: 'green' },
-    { key: 'sie' as const,  icon: TrendingUp, title: 'SIE4 – Bokföring',      sub: 'Import till bokföringssystem',  color: 'amber' },
+    { key: 'agi' as const,  icon: FileText,   title: 'AGI – Skatteverket',   sub: 'Arbetsgivardeklaration XML',   color: 'blue' },
+    { key: 'pain' as const, icon: Download,   title: 'PAIN.001 – Bank',      sub: 'Bankfil för utbetalning',      color: 'green' },
+    { key: 'sie' as const,  icon: TrendingUp, title: 'SIE4 – Bokföring',     sub: 'Import till bokföringssystem', color: 'amber' },
   ]
 
   return (
@@ -323,7 +344,7 @@ function SettingsPage({ employer, onSave }: { employer: Employer | null; onSave:
         {[
           { key: 'name',        label: 'Företagsnamn',        placeholder: 'AB Exempelföretaget' },
           { key: 'orgNr',       label: 'Organisationsnummer', placeholder: '556123-4567' },
-          { key: 'bankAccount', label: 'Bankkonto (BBAN)',     placeholder: 'SE0000000000000000' },
+          { key: 'bankAccount', label: 'Bankkonto (BBAN)',    placeholder: 'SE0000000000000000' },
         ].map(({ key, label, placeholder }) => (
           <div key={key} className="mb-4">
             <label className="text-xs text-slate-400 font-medium block mb-1.5">{label}</label>
@@ -376,10 +397,7 @@ function EmployeeModal({ employee, onSave, onClose }: {
   })
 
   const handleSave = () => {
-    if (!form.name.trim()) {
-      alert('Ange namn på den anställde')
-      return
-    }
+    if (!form.name.trim()) { alert('Ange namn på den anställde'); return }
     onSave({ ...form, id: employee?.id ?? generateId() })
     onClose()
   }
@@ -394,78 +412,44 @@ function EmployeeModal({ employee, onSave, onClose }: {
     >
       <div
         className="w-full rounded-t-3xl p-5 pb-10"
-        style={{
-          backgroundColor: '#0f172a',
-          maxHeight: '92vh',
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
-        }}
+        style={{ backgroundColor: '#0f172a', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Drag-indikator */}
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
-
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
             {employee ? 'Redigera anställd' : 'Ny anställd'}
           </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400"
-            style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
-          >
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400"
+            style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}>
             <X size={16} />
           </button>
         </div>
 
-        {/* Namn */}
-        <div className="mb-4">
-          <label className="text-xs text-slate-400 font-medium block mb-1.5">Namn *</label>
-          <input
-            type="text"
-            value={form.name}
-            onChange={e => setForm({ ...form, name: e.target.value })}
-            placeholder="Anna Andersson"
-            autoFocus
-            className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
-            style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-          />
-        </div>
+        {[
+          { key: 'name',         label: 'Namn *',              placeholder: 'Anna Andersson',    type: 'text',   autoFocus: true },
+          { key: 'personnummer', label: 'Personnummer',         placeholder: '19900101-1234',     type: 'text' },
+          { key: 'baseSalary',   label: 'Grundlön (kr/mån)',   placeholder: '35000',             type: 'number' },
+          { key: 'weeklyHours',  label: 'Veckoarbetstid (h)',  placeholder: '40',                type: 'number' },
+          { key: 'startDate',    label: 'Startdatum',          placeholder: '',                  type: 'date' },
+        ].map(({ key, label, placeholder, type, autoFocus }) => (
+          <div key={key} className="mb-4">
+            <label className="text-xs text-slate-400 font-medium block mb-1.5">{label}</label>
+            <input
+              type={type} value={(form as any)[key]} placeholder={placeholder}
+              autoFocus={autoFocus}
+              onChange={e => setForm({ ...form, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
+              className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
+              style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+            />
+          </div>
+        ))}
 
-        {/* Personnummer */}
-        <div className="mb-4">
-          <label className="text-xs text-slate-400 font-medium block mb-1.5">Personnummer</label>
-          <input
-            type="text"
-            value={form.personnummer}
-            onChange={e => setForm({ ...form, personnummer: e.target.value })}
-            placeholder="19900101-1234"
-            className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
-            style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-          />
-        </div>
-
-        {/* Grundlön */}
-        <div className="mb-4">
-          <label className="text-xs text-slate-400 font-medium block mb-1.5">Grundlön (kr/mån)</label>
-          <input
-            type="number"
-            value={form.baseSalary}
-            onChange={e => setForm({ ...form, baseSalary: Number(e.target.value) })}
-            className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
-            style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-          />
-        </div>
-
-        {/* Sysselsättningsgrad */}
         <div className="mb-4">
           <label className="text-xs text-slate-400 font-medium block mb-1.5">
             Sysselsättningsgrad ({Math.round(form.employmentDegree * 100)}%)
           </label>
-          <input
-            type="range"
-            min="0.25" max="1.0" step="0.25"
-            value={form.employmentDegree}
+          <input type="range" min="0.25" max="1.0" step="0.25" value={form.employmentDegree}
             onChange={e => setForm({ ...form, employmentDegree: Number(e.target.value) })}
             className="w-full accent-blue-500"
           />
@@ -474,31 +458,6 @@ function EmployeeModal({ employee, onSave, onClose }: {
           </div>
         </div>
 
-        {/* Veckoarbetstid */}
-        <div className="mb-4">
-          <label className="text-xs text-slate-400 font-medium block mb-1.5">Veckoarbetstid (timmar)</label>
-          <input
-            type="number"
-            value={form.weeklyHours}
-            onChange={e => setForm({ ...form, weeklyHours: Number(e.target.value) })}
-            className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
-            style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-          />
-        </div>
-
-        {/* Startdatum */}
-        <div className="mb-4">
-          <label className="text-xs text-slate-400 font-medium block mb-1.5">Startdatum</label>
-          <input
-            type="date"
-            value={form.startDate}
-            onChange={e => setForm({ ...form, startDate: e.target.value })}
-            className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
-            style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
-          />
-        </div>
-
-        {/* Övertid toggle */}
         <div className="flex items-center justify-between mb-5 p-3 rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
           <span className="text-slate-300 text-sm">Övertidsberättigad</span>
           <button
@@ -506,25 +465,18 @@ function EmployeeModal({ employee, onSave, onClose }: {
             className="relative w-12 h-6 rounded-full transition-colors"
             style={{ backgroundColor: form.overtimeEligible ? '#3b82f6' : '#475569' }}
           >
-            <div
-              className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
-              style={{ transform: form.overtimeEligible ? 'translateX(26px)' : 'translateX(2px)' }}
-            />
+            <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+              style={{ transform: form.overtimeEligible ? 'translateX(26px)' : 'translateX(2px)' }} />
           </button>
         </div>
 
-        {/* Faktisk lön preview */}
         <div className="p-4 rounded-xl mb-5" style={{ backgroundColor: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
           <p className="text-xs text-slate-400 mb-0.5">Faktisk månadslön</p>
           <p className="text-2xl font-bold text-blue-300">{kr(actualSalary)}</p>
         </div>
 
-        {/* Spara-knapp */}
-        <button
-          onClick={handleSave}
-          className="w-full py-4 rounded-2xl font-bold text-white text-base"
-          style={{ backgroundColor: '#3b82f6' }}
-        >
+        <button onClick={handleSave} className="w-full py-4 rounded-2xl font-bold text-white text-base"
+          style={{ backgroundColor: '#3b82f6' }}>
           {employee ? 'Uppdatera' : '+ Lägg till'}
         </button>
       </div>
@@ -547,19 +499,13 @@ function PayrollModal({ employees, onRun, onClose }: {
     }]))
   )
 
-  const setInput = (id: string, key: keyof MonthlyInput, value: number) => {
+  const setInput = (id: string, key: keyof MonthlyInput, value: number) =>
     setInputs(prev => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
-  }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end"
-      style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
-    >
-      <div
-        className="w-full rounded-t-3xl p-5 pb-10"
-        style={{ backgroundColor: '#0f172a', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
-      >
+    <div className="fixed inset-0 z-50 flex items-end" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}>
+      <div className="w-full rounded-t-3xl p-5 pb-10"
+        style={{ backgroundColor: '#0f172a', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
@@ -601,11 +547,8 @@ function PayrollModal({ employees, onRun, onClose }: {
           )
         })}
 
-        <button
-          onClick={() => onRun(inputs)}
-          className="w-full py-4 rounded-2xl font-bold text-white mt-2"
-          style={{ backgroundColor: '#3b82f6' }}
-        >
+        <button onClick={() => onRun(inputs)} className="w-full py-4 rounded-2xl font-bold text-white mt-2"
+          style={{ backgroundColor: '#3b82f6' }}>
           Beräkna och spara
         </button>
       </div>
@@ -616,12 +559,12 @@ function PayrollModal({ employees, onRun, onClose }: {
 // ─── HUVUD-APP ────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage]               = useState<Page>('dashboard')
-  const [modal, setModal]             = useState<Modal>(null)
+  const [page, setPage]                 = useState<Page>('dashboard')
+  const [modal, setModal]               = useState<Modal>(null)
   const [editEmployee, setEditEmployee] = useState<Employee | undefined>()
-  const [employees, setEmployees]     = useState<Employee[]>([])
-  const [employer, setEmployer]       = useState<Employer | null>(null)
-  const [, forceUpdate]               = useState(0)
+  const [employees, setEmployees]       = useState<Employee[]>([])
+  const [employer, setEmployer]         = useState<Employer | null>(null)
+  const [, forceUpdate]                 = useState(0)
 
   useEffect(() => {
     setEmployees(getEmployees())
@@ -640,15 +583,21 @@ export default function App() {
     }
   }
 
+  // Använder savePayrollResultForMonth — dubblettskydd inbyggt
   const handleRunPayroll = (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
     employees.forEach(emp => {
       const result = calculateMonthlyPayroll(emp, inputs[emp.id], month)
-      savePayrollResult(result)
+      savePayrollResultForMonth(result)
     })
     setModal(null)
     forceUpdate(n => n + 1)
     setPage('dashboard')
+  }
+
+  const handleDeletePayroll = (employeeId: string, month: string) => {
+    deletePayrollResult(employeeId, month)
+    forceUpdate(n => n + 1)
   }
 
   const goToEmployees = () => {
@@ -667,10 +616,14 @@ export default function App() {
   return (
     <div style={{ backgroundColor: '#0a0f1e', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
 
-      {/* Sidor */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden', height: 'calc(100dvh - 65px)' }}>
         {page === 'dashboard' && (
-          <DashboardPage employees={employees} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} />
+          <DashboardPage
+            employees={employees}
+            onRunPayroll={() => setModal('runPayroll')}
+            onGoToEmployees={goToEmployees}
+            onDeletePayroll={handleDeletePayroll}
+          />
         )}
         {page === 'employees' && (
           <EmployeesPage
@@ -681,13 +634,17 @@ export default function App() {
           />
         )}
         {page === 'payroll' && (
-          <DashboardPage employees={employees} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} />
+          <DashboardPage
+            employees={employees}
+            onRunPayroll={() => setModal('runPayroll')}
+            onGoToEmployees={goToEmployees}
+            onDeletePayroll={handleDeletePayroll}
+          />
         )}
         {page === 'reports'  && <ReportsPage employees={employees} employer={employer} />}
         {page === 'settings' && <SettingsPage employer={employer} onSave={e => { saveEmployer(e); setEmployer(e) }} />}
       </main>
 
-      {/* Navigationsfält */}
       <nav style={{
         position: 'fixed', bottom: 0, left: 0, right: 0,
         backgroundColor: 'rgba(15,23,42,0.95)',
@@ -708,13 +665,8 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Modaler — renderas utanför main, inte påverkade av overflow:hidden */}
       {(modal === 'addEmployee' || modal === 'editEmployee') && (
-        <EmployeeModal
-          employee={editEmployee}
-          onSave={handleSaveEmployee}
-          onClose={() => setModal(null)}
-        />
+        <EmployeeModal employee={editEmployee} onSave={handleSaveEmployee} onClose={() => setModal(null)} />
       )}
       {modal === 'runPayroll' && employees.length > 0 && (
         <PayrollModal employees={employees} onRun={handleRunPayroll} onClose={() => setModal(null)} />
