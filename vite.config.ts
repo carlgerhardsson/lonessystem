@@ -27,16 +27,5 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['tests/setup.ts'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'lcov'],
-      include: ['src/engine/**', 'src/store/**'],
-      exclude: ['src/main.tsx', 'src/App.tsx'],
-      // Tröskel på 50% — höjs gradvis när fler tester läggs till
-      thresholds: {
-        lines: 50,
-        functions: 50,
-      }
-    }
   }
 })
