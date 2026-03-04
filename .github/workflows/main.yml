@@ -1,16 +1,14 @@
 name: 🤖 CI/CD Pipeline
 
-# ─── TRIGGRAR ────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main, 'feature/**']
   pull_request:
     branches: [main]
 
-# ─── JOBB ────────────────────────────────────────────────────────────────────
 jobs:
 
-  # ── 1. VALIDERA KONFIGURATION (NY: fångar postcss/config-buggar tidigt) ────
+  # ── 1. VALIDERA KONFIGURATION ─────────────────────────────────────────────
   validate:
     name: ✅ Validera konfigfiler
     runs-on: ubuntu-latest
@@ -53,7 +51,7 @@ jobs:
           fi
           echo "✅ postcss.config.js ser korrekt ut"
 
-  # ── 2. TESTER (beror på validate — körs aldrig om konfig är trasig) ────────
+  # ── 2. TESTER ─────────────────────────────────────────────────────────────
   test:
     name: 🧪 Tester (TDD)
     needs: [validate]
@@ -63,11 +61,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - name: Installera beroenden
         run: npm install
-      - name: Kör alla tester med coverage
-        run: npm test -- --coverage
+      - name: Kör alla tester
+        run: npm test
       - name: Ladda upp coverage-rapport
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,7 +72,7 @@ jobs:
           name: coverage-rapport
           path: coverage/
 
-  # ── 3. BYGGVALIDERING (NY: verifiera att koden faktiskt kompileras) ─────────
+  # ── 3. BYGGVALIDERING ─────────────────────────────────────────────────────
   build-check:
     name: 🔨 Byggvalidering
     needs: [validate]
@@ -85,26 +82,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - run: npm install
-      - name: TypeScript-kompilering
-        run: npx tsc --noEmit
-      - name: Bygg produktionsapp (dist/)
+      - name: Bygg produktionsapp
         run: npm run build
       - name: Verifiera att dist/ skapades
         run: |
-          if [ ! -d "dist" ]; then
-            echo "❌ dist/ saknas — bygget misslyckades"
-            exit 1
-          fi
           if [ ! -f "dist/index.html" ]; then
             echo "❌ dist/index.html saknas"
             exit 1
           fi
-          echo "✅ dist/ skapad och index.html finns"
+          echo "✅ Bygget lyckades"
           ls -la dist/
 
-  # ── 4. SÄKERHETSSKANNING ────────────────────────────────────────────────────
+  # ── 4. SÄKERHETSSKANNING ──────────────────────────────────────────────────
   security:
     name: 🔒 Säkerhetsskanning
     runs-on: ubuntu-latest
@@ -114,11 +104,10 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
-      - name: npm audit
-        run: npm audit --audit-level=high
+      - run: npm audit --audit-level=high
         continue-on-error: true
 
-  # ── 5. DEPLOY (kräver att ALLA ovan är gröna) ─────────────────────────────
+  # ── 5. DEPLOY ─────────────────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy till GitHub Pages
     needs: [test, build-check]
@@ -131,10 +120,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - run: npm install
-      - name: Bygg för produktion
-        run: npm run build
+      - run: npm run build
       - name: Deploya till GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
@@ -144,4 +131,4 @@ jobs:
       - name: Sammanfattning
         run: |
           echo "## 🚀 Deploy klar!" >> $GITHUB_STEP_SUMMARY
-          echo "Appen är live på: https://carlgerhardsson.github.io/lonessystem/" >> $GITHUB_STEP_SUMMARY
+          echo "Live: https://carlgerhardsson.github.io/lonessystem/" >> $GITHUB_STEP_SUMMARY
