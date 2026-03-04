@@ -58,25 +58,22 @@ export const getPayrollHistory = (): PayrollResult[] => {
   return raw ? JSON.parse(raw) : []
 }
 
-// Gammal funktion — bevarad för bakåtkompatibilitet
 export const savePayrollResult = (result: PayrollResult): void => {
   const history = getPayrollHistory()
   history.push(result)
   localStorage.setItem(KEYS.PAYROLL, JSON.stringify(history))
 }
 
-// NY: Ersätter befintligt resultat för samma anställd+månad (dubblettskydd)
 export const savePayrollResultForMonth = (result: PayrollResult): void => {
   const history = getPayrollHistory()
   const idx = history.findIndex(
     r => r.employeeId === result.employeeId && r.month === result.month
   )
-  if (idx >= 0) history[idx] = result  // Ersätt befintlig
-  else history.push(result)             // Lägg till ny
+  if (idx >= 0) history[idx] = result
+  else history.push(result)
   localStorage.setItem(KEYS.PAYROLL, JSON.stringify(history))
 }
 
-// NY: Ta bort enskild lönespecrad
 export const deletePayrollResult = (employeeId: string, month: string): void => {
   const history = getPayrollHistory().filter(
     r => !(r.employeeId === employeeId && r.month === month)
@@ -86,6 +83,12 @@ export const deletePayrollResult = (employeeId: string, month: string): void => 
 
 export const getPayrollForMonth = (month: string): PayrollResult[] =>
   getPayrollHistory().filter(r => r.month === month)
+
+// NY: Hämta alla lönespecar för en anställd, sorterade kronologiskt
+export const getPayrollForEmployee = (employeeId: string): PayrollResult[] =>
+  getPayrollHistory()
+    .filter(r => r.employeeId === employeeId)
+    .sort((a, b) => a.month.localeCompare(b.month))
 
 // ─── API-ADAPTER (förbered för v2) ────────────────────────────────────────────
 
