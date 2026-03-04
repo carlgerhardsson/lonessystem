@@ -25,7 +25,26 @@ export default defineConfig({
   ],
   test: {
     globals: true,
+    // Separata miljöer per testmapp:
+    // - frontend-tester kör i jsdom (DOM-stöd)
+    // - engine/config-tester kör i node (filsystem-stöd)
+    environmentMatchGlobs: [
+      ['tests/frontend/**', 'jsdom'],
+      ['tests/config/**', 'node'],
+      ['tests/engine/**', 'node'],
+    ],
     environment: 'jsdom',
-    coverage: { provider: 'v8', reporter: ['text', 'lcov'] }
+    setupFiles: ['tests/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'html'],
+      include: ['src/**'],
+      exclude: ['src/main.tsx'],
+      thresholds: {
+        // Minsta testtäckning — CI misslyckas om vi faller under dessa
+        lines: 70,
+        functions: 70,
+      }
+    }
   }
 })
