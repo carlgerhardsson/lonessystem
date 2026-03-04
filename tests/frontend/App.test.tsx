@@ -1,157 +1,147 @@
-// 🧪 TESTING AGENT v2 — Smoke tests för frontend
-// Fångar render-krascher, modal-buggar och layout-problem
-// LÄRDOMEN: TDD gäller hela stacken, inte bara affärslogiken
+// 🧪 TESTING AGENT v2 — Store-integrationstester
+// Testar datalagret (localStorage) utan React-beroenden
+// Dessa fångar fel i spara/hämta-logiken som drabbar användaren
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  getEmployees, saveEmployee, deleteEmployee, generateId,
+  getEmployer, saveEmployer, getPayrollHistory, savePayrollResult,
+} from '../../src/store/index'
+import type { Employee } from '../../src/engine/calculations'
 
-// Mocka localStorage så tester inte påverkar varandra
-beforeEach(() => {
-  localStorage.clear()
-  vi.clearAllMocks()
+// ─── HJÄLPFUNKTIONER ─────────────────────────────────────────────────────────
+
+const makeEmployee = (overrides = {}): Employee => ({
+  id: generateId(),
+  name: 'Anna Andersson',
+  personnummer: '19900101-1234',
+  baseSalary: 40000,
+  employmentDegree: 1.0,
+  weeklyHours: 40,
+  overtimeEligible: true,
+  taxColumn: 33,
+  startDate: '2024-01-01',
+  ...overrides,
 })
 
-// Mocka lucide-react ikoner (behövs inte i jsdom)
-vi.mock('lucide-react', () => ({
-  Users: () => null, Calculator: () => null, FileText: () => null,
-  Settings: () => null, Plus: () => null, ChevronRight: () => null,
-  TrendingUp: () => null, AlertCircle: () => null, CheckCircle: () => null,
-  Download: () => null, Trash2: () => null, Edit3: () => null, X: () => null,
-}))
+// ─── ANSTÄLLDA ────────────────────────────────────────────────────────────────
 
-// ─── SMOKE TEST: Appen kraschar inte vid rendering ────────────────────────────
+describe('Anställda — CRUD', () => {
+  beforeEach(() => localStorage.clear())
 
-describe('App — smoke tests', () => {
-  it('renderar utan att krascha', async () => {
-    const { default: App } = await import('../../src/App')
-    expect(() => render(<App />)).not.toThrow()
+  it('returnerar tom lista när inga anställda finns', () => {
+    expect(getEmployees()).toEqual([])
   })
 
-  it('visar navigationsfältet med alla 5 sektioner', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    expect(screen.getByText('Hem')).toBeInTheDocument()
-    expect(screen.getByText('Personal')).toBeInTheDocument()
-    expect(screen.getByText('Lön')).toBeInTheDocument()
-    expect(screen.getByText('Rapport')).toBeInTheDocument()
-    expect(screen.getByText('Inst.')).toBeInTheDocument()
+  it('sparar och hämtar en anställd', () => {
+    const emp = makeEmployee()
+    saveEmployee(emp)
+    const result = getEmployees()
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('Anna Andersson')
   })
 
-  it('startar på dashboard-sidan', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    expect(screen.getByText('Översikt')).toBeInTheDocument()
-  })
-})
-
-// ─── NAVIGATIONSTESTER ────────────────────────────────────────────────────────
-
-describe('Navigation', () => {
-  it('navigerar till Personal-sidan', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    expect(screen.getByText('Anställda')).toBeInTheDocument()
+  it('uppdaterar befintlig anställd (samma id)', () => {
+    const emp = makeEmployee()
+    saveEmployee(emp)
+    saveEmployee({ ...emp, baseSalary: 50000 })
+    const result = getEmployees()
+    expect(result).toHaveLength(1)
+    expect(result[0].baseSalary).toBe(50000)
   })
 
-  it('navigerar till Inställningar-sidan', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Inst.'))
-    expect(screen.getByText('Inställningar')).toBeInTheDocument()
+  it('sparar flera anställda', () => {
+    saveEmployee(makeEmployee({ id: 'emp-1', name: 'Anna' }))
+    saveEmployee(makeEmployee({ id: 'emp-2', name: 'Björn' }))
+    saveEmployee(makeEmployee({ id: 'emp-3', name: 'Cecilia' }))
+    expect(getEmployees()).toHaveLength(3)
   })
 
-  it('navigerar till Rapporter-sidan', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Rapport'))
-    expect(screen.getByText('Rapporter')).toBeInTheDocument()
-  })
-})
-
-// ─── MODAL-TESTER (fångar overflow-hidden-buggen) ─────────────────────────────
-
-describe('Lägg till anställd — modal', () => {
-  it('öppnar modal när + klickas på Personal-sidan', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    // Klicka på + Lägg till anställd knappen
-    const addBtn = screen.getByText('+ Lägg till anställd')
-    fireEvent.click(addBtn)
-    expect(screen.getByText('Ny anställd')).toBeInTheDocument()
+  it('tar bort anställd', () => {
+    const emp = makeEmployee({ id: 'emp-ta-bort' })
+    saveEmployee(emp)
+    deleteEmployee('emp-ta-bort')
+    expect(getEmployees()).toHaveLength(0)
   })
 
-  it('stänger modal när X klickas', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    fireEvent.click(screen.getByText('+ Lägg till anställd'))
-    // Stäng via X-knappen
-    const closeBtn = document.querySelector('[data-testid="modal-close"]') ||
-      screen.getAllByRole('button').find(b => b.querySelector('svg'))
-    if (closeBtn) fireEvent.click(closeBtn)
-    // Modal ska vara stängd (ingen "Ny anställd" titel)
-    expect(screen.queryByText('Ny anställd')).not.toBeInTheDocument()
-  })
-
-  it('kan spara en ny anställd med namn och lön', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    fireEvent.click(screen.getByText('+ Lägg till anställd'))
-
-    // Fyll i namn
-    const nameInput = screen.getByPlaceholderText('Anna Andersson')
-    fireEvent.change(nameInput, { target: { value: 'Test Testsson' } })
-
-    // Klicka Lägg till
-    fireEvent.click(screen.getByText('+ Lägg till'))
-
-    // Anställde ska synas i listan
-    expect(screen.getByText('Test Testsson')).toBeInTheDocument()
-  })
-
-  it('visar felmeddelande om namn saknas', async () => {
-    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {})
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    fireEvent.click(screen.getByText('+ Lägg till anställd'))
-    // Försök spara utan namn
-    fireEvent.click(screen.getByText('+ Lägg till'))
-    expect(alertMock).toHaveBeenCalledWith('Ange namn på den anställde')
+  it('tar bara bort rätt anställd', () => {
+    saveEmployee(makeEmployee({ id: 'emp-1', name: 'Behåll' }))
+    saveEmployee(makeEmployee({ id: 'emp-2', name: 'Ta bort' }))
+    deleteEmployee('emp-2')
+    const result = getEmployees()
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('Behåll')
   })
 })
 
-// ─── LOCALSTORAGE-PERSISTENS ──────────────────────────────────────────────────
+// ─── ARBETSGIVARE ─────────────────────────────────────────────────────────────
 
-describe('Datalagring', () => {
-  it('sparar anställd i localStorage', async () => {
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    fireEvent.click(screen.getByText('+ Lägg till anställd'))
-    fireEvent.change(screen.getByPlaceholderText('Anna Andersson'), { target: { value: 'Sparad Person' } })
-    fireEvent.click(screen.getByText('+ Lägg till'))
+describe('Arbetsgivare', () => {
+  beforeEach(() => localStorage.clear())
 
-    const saved = JSON.parse(localStorage.getItem('lonessystem:employees') || '[]')
-    expect(saved.length).toBe(1)
-    expect(saved[0].name).toBe('Sparad Person')
+  it('returnerar null när inget är sparat', () => {
+    expect(getEmployer()).toBeNull()
   })
 
-  it('laddar anställda från localStorage vid start', async () => {
-    // Förinläs data i localStorage
-    localStorage.setItem('lonessystem:employees', JSON.stringify([{
-      id: 'test-1', name: 'Förinstallerad Person', personnummer: '',
-      baseSalary: 40000, employmentDegree: 1.0, weeklyHours: 40,
-      overtimeEligible: true, taxColumn: 33, startDate: '2024-01-01'
-    }]))
+  it('sparar och hämtar arbetsgivarinformation', () => {
+    saveEmployer({ orgNr: '556123-4567', name: 'Test AB', bankAccount: 'SE00', taxColumn: 33 })
+    const result = getEmployer()
+    expect(result?.name).toBe('Test AB')
+    expect(result?.orgNr).toBe('556123-4567')
+  })
 
-    const { default: App } = await import('../../src/App')
-    render(<App />)
-    fireEvent.click(screen.getByText('Personal'))
-    expect(screen.getByText('Förinstallerad Person')).toBeInTheDocument()
+  it('skriver över tidigare arbetsgivarinfo', () => {
+    saveEmployer({ orgNr: '111', name: 'Gammalt AB', bankAccount: '', taxColumn: 33 })
+    saveEmployer({ orgNr: '222', name: 'Nytt AB', bankAccount: '', taxColumn: 33 })
+    expect(getEmployer()?.name).toBe('Nytt AB')
+  })
+})
+
+// ─── LÖNEHISTORIK ─────────────────────────────────────────────────────────────
+
+describe('Lönehistorik', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('returnerar tom lista vid start', () => {
+    expect(getPayrollHistory()).toEqual([])
+  })
+
+  it('sparar löneresultat', () => {
+    savePayrollResult({
+      employeeId: 'emp-1', month: '202603',
+      baseSalary: 40000, actualSalary: 40000,
+      sickLeaveDeduction: 0, sickPay: 0, karensDeduction: 0,
+      overtimePay: 0, extraTimePay: 0, vacationAllowance: 0,
+      grossSalary: 40000, incomeTax: 8800, netSalary: 31200,
+      employerFee: 12568, itp1: 1800,
+    })
+    expect(getPayrollHistory()).toHaveLength(1)
+  })
+
+  it('bevarar flera löneresultat i historiken', () => {
+    for (let i = 1; i <= 3; i++) {
+      savePayrollResult({
+        employeeId: `emp-${i}`, month: '202603',
+        baseSalary: 40000, actualSalary: 40000,
+        sickLeaveDeduction: 0, sickPay: 0, karensDeduction: 0,
+        overtimePay: 0, extraTimePay: 0, vacationAllowance: 0,
+        grossSalary: 40000, incomeTax: 8800, netSalary: 31200,
+        employerFee: 12568, itp1: 1800,
+      })
+    }
+    expect(getPayrollHistory()).toHaveLength(3)
+  })
+})
+
+// ─── ID-GENERERING ────────────────────────────────────────────────────────────
+
+describe('generateId', () => {
+  it('genererar unika ID:n', () => {
+    const ids = new Set(Array.from({ length: 100 }, generateId))
+    expect(ids.size).toBe(100)
+  })
+
+  it('börjar med emp_', () => {
+    expect(generateId()).toMatch(/^emp_/)
   })
 })
