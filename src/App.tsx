@@ -1,5 +1,5 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Fix: async store-anrop + borttagna oanvända importer
+// Fix: visualViewport offsetLeft spåras nu → modal centreras korrekt när tangentbord är uppe
 
 import { useState, useEffect } from 'react'
 import {
@@ -39,40 +39,82 @@ type Page = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings'
 type Modal = 'addEmployee' | 'editEmployee' | 'runPayroll' | 'employeeHistory' | null
 
 // ─── iOS VISUAL VIEWPORT HOOK ─────────────────────────────────────────────────
+// Spårar ALLA fyra värden från visualViewport:
+//   - width/height: faktiskt synlig yta (exkl. tangentbord)
+//   - offsetLeft/offsetTop: förskjutning när iOS panorerar viewporten
+// Utan offsetLeft hamnar modalen utanför skärmen till vänster när tangentbordet är uppe.
 
-function useVisualViewport() {
-  const [vpHeight, setVpHeight] = useState<number>(
-    () => window.visualViewport?.height ?? window.innerHeight
-  )
-  const [vpOffsetTop, setVpOffsetTop] = useState<number>(
-    () => window.visualViewport?.offsetTop ?? 0
-  )
+interface Viewport {
+  width: number
+  height: number
+  offsetLeft: number
+  offsetTop: number
+}
+
+function useVisualViewport(): Viewport {
+  const getVp = (): Viewport => ({
+    width:      window.visualViewport?.width      ?? window.innerWidth,
+    height:     window.visualViewport?.height     ?? window.innerHeight,
+    offsetLeft: window.visualViewport?.offsetLeft ?? 0,
+    offsetTop:  window.visualViewport?.offsetTop  ?? 0,
+  })
+
+  const [vp, setVp] = useState<Viewport>(getVp)
+
   useEffect(() => {
-    const vp = window.visualViewport
-    if (!vp) return
-    const update = () => { setVpHeight(vp.height); setVpOffsetTop(vp.offsetTop) }
-    vp.addEventListener('resize', update)
-    vp.addEventListener('scroll', update)
-    return () => { vp.removeEventListener('resize', update); vp.removeEventListener('scroll', update) }
+    const viewport = window.visualViewport
+    if (!viewport) return
+    const update = () => setVp(getVp())
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    return () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+    }
   }, [])
-  return { vpHeight, vpOffsetTop }
+
+  return vp
 }
 
 // ─── MODAL-WRAPPER ────────────────────────────────────────────────────────────
+// Overlay täcker exakt den synliga ytan (offsetLeft + width, offsetTop + height).
+// Sheet positioneras mot botten av den synliga ytan.
+// Detta eliminerar den horisontella förskjutningen när iOS-tangentbordet öppnas.
 
 function ModalSheet({ onBackdropClick, children }: {
   onBackdropClick?: () => void; children: React.ReactNode
 }) {
-  const { vpHeight, vpOffsetTop } = useVisualViewport()
+  const { width, height, offsetLeft, offsetTop } = useVisualViewport()
+
   return (
-    <div className="fixed inset-0 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
-      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}>
-      <div style={{
-        position: 'absolute', left: 0, right: 0,
-        top: vpOffsetTop + vpHeight, transform: 'translateY(-100%)',
-        backgroundColor: '#0f172a', borderTopLeftRadius: '1.5rem', borderTopRightRadius: '1.5rem',
-        maxHeight: vpHeight * 0.92, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
-      } as React.CSSProperties} onClick={e => e.stopPropagation()}>
+    <div
+      style={{
+        position: 'fixed',
+        // Täck exakt den synliga ytan — kompensera för iOS viewport-panorering
+        left:            offsetLeft,
+        top:             offsetTop,
+        width:           width,
+        height:          height,
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        zIndex:          50,
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}
+    >
+      <div
+        style={{
+          position:              'absolute',
+          left:                  0,
+          right:                 0,
+          bottom:                0,
+          backgroundColor:       '#0f172a',
+          borderTopLeftRadius:   '1.5rem',
+          borderTopRightRadius:  '1.5rem',
+          maxHeight:             height * 0.92,
+          overflowY:             'auto',
+          WebkitOverflowScrolling: 'touch',
+        } as React.CSSProperties}
+        onClick={e => e.stopPropagation()}
+      >
         {children}
       </div>
     </div>
@@ -439,6 +481,7 @@ function EmployeeModal({ employee, onSave, onClose }: {
             <label className="text-xs text-slate-400 font-medium block mb-1.5">{label}</label>
             <input type={type} value={(form as any)[key]} placeholder={placeholder} autoFocus={autoFocus}
               onChange={e => setForm({ ...form, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
+              inputMode={type === 'number' ? 'decimal' : undefined}
               className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
               style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }} />
           </div>
@@ -528,9 +571,8 @@ export default function App() {
   const [employer, setEmployer]               = useState<Employer | null>(null)
 
   const reload = async () => {
-    const [emps, pay, emp] = await Promise.all([getEmployees(), getPayrollForMonth(''), getEmployer()])
+    const [emps, emp] = await Promise.all([getEmployees(), getEmployer()])
     setEmployees(emps)
-    // Ladda hela historiken för dashboard och personal-badges
     const { getPayrollHistory } = await import('./store')
     setPayroll(await getPayrollHistory())
     setEmployer(emp)
