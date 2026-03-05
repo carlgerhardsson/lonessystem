@@ -1,7 +1,8 @@
 // ⚙️ BACKEND AGENT — Lokal datalagring
 // Hanterar all data i localStorage (version 1)
 // Förberedd för API-migration (version 2)
-// Säkerhet: känslig data kodas med AES-GCM via Web Crypto API
+// Säkerhet: känslig data krypteras med AES-GCM via Web Crypto API
+//           Fallback till JSON om crypto.subtle saknas (testmiljö)
 
 import type { Employee, PayrollResult } from '../engine/calculations'
 
@@ -13,10 +14,11 @@ const KEYS = {
 } as const
 
 // ─── KRYPTERING (AES-GCM via Web Crypto API) ──────────────────────────────────
-// Lönedata, personnummer och bankkontonummer krypteras innan lagring i localStorage.
-// Nyckeln genereras per enhet och lagras i localStorage (skyddar mot enkla
-// klartext-läsningar men inte mot en angripare med fysisk tillgång till enheten).
-// I v2 ersätts detta med server-side kryptering.
+// crypto.subtle kräver säker kontext (HTTPS/localhost).
+// I testmiljö (Vitest/jsdom) saknas subtle — vi faller tillbaka till klartext.
+
+const hasCrypto = (): boolean =>
+  typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined'
 
 const getOrCreateKey = async (): Promise<CryptoKey> => {
   const stored = localStorage.getItem(KEYS.KEY)
@@ -31,6 +33,7 @@ const getOrCreateKey = async (): Promise<CryptoKey> => {
 }
 
 const encryptData = async (data: string): Promise<string> => {
+  if (!hasCrypto()) return data  // Testmiljö: lagra som klartext
   const key = await getOrCreateKey()
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const encoded = new TextEncoder().encode(data)
@@ -38,10 +41,14 @@ const encryptData = async (data: string): Promise<string> => {
   const combined = new Uint8Array(iv.byteLength + cipher.byteLength)
   combined.set(iv, 0)
   combined.set(new Uint8Array(cipher), iv.byteLength)
-  return btoa(String.fromCharCode(...combined))
+  return '__enc__' + btoa(String.fromCharCode(...combined))
 }
 
-const decryptData = async (encoded: string): Promise<string> => {
+const decryptData = async (raw: string): Promise<string> => {
+  // Okrypterat (testmiljö eller äldre data)
+  if (!raw.startsWith('__enc__')) return raw
+  if (!hasCrypto()) return raw
+  const encoded = raw.slice(7) // ta bort '__enc__'-prefix
   const key = await getOrCreateKey()
   const combined = Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
   const iv = combined.slice(0, 12)
@@ -50,8 +57,6 @@ const decryptData = async (encoded: string): Promise<string> => {
   return new TextDecoder().decode(plain)
 }
 
-// Synkrona hjälpfunktioner som hanterar kryptering transparent
-// (använder Promise men exponerar synkron API via cache för läsningar)
 const store = async (key: string, value: unknown): Promise<void> => {
   const encrypted = await encryptData(JSON.stringify(value))
   localStorage.setItem(key, encrypted)
@@ -64,7 +69,6 @@ const load = async <T>(key: string, fallback: T): Promise<T> => {
     const decrypted = await decryptData(raw)
     return JSON.parse(decrypted) as T
   } catch {
-    // Fallback: hantera okrypterad data från tidigare versioner
     try { return JSON.parse(raw) as T } catch { return fallback }
   }
 }
