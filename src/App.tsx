@@ -1,7 +1,8 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Fix: blur aktivt fält + vänta på att tangentbordet är helt nere innan scroll återställs
+// Rotfix: Ta bort useVisualViewport helt från ModalSheet.
+// Modalen använder nu bara position:fixed + inset:0 — stabil, ingen re-rendering vid tangentbord.
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Users, Calculator, FileText, Settings, Plus, ChevronRight,
   TrendingUp, AlertCircle, CheckCircle, Download, Trash2, Edit3, X,
@@ -35,148 +36,42 @@ const currentMonth = () => {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-// ─── ÅTERSTÄLL SCROLL EFTER TANGENTBORD ───────────────────────────────────────
-// Problemet: iOS animerar ned tangentbordet (~300ms) efter blur.
-// Under animationen är visualViewport.offsetLeft fortfarande förskjuten.
-// Om vi scrollar direkt hamnar vi fel — vi måste vänta tills animationen är klar.
-//
-// Strategi:
-//   1. Blur:a aktivt fält så tangentbordet börjar stänga
-//   2. Vänta tills visualViewport.height slutar förändras (tangentbordet är nere)
-//   3. Återställ window scroll till 0,0
-
-const resetScrollWhenKeyboardGone = (callback?: () => void) => {
-  // Stäng tangentbordet direkt
-  if (document.activeElement instanceof HTMLElement) {
-    document.activeElement.blur()
-  }
-
-  const vp = window.visualViewport
-  if (!vp) {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
-    document.documentElement.scrollLeft = 0
-    document.body.scrollLeft = 0
-    callback?.()
-    return
-  }
-
-  const fullHeight = window.innerHeight
-  const isKeyboardOpen = vp.height < fullHeight * 0.75
-
-  if (!isKeyboardOpen) {
-    // Tangentbordet är redan nere — återställ direkt
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
-    document.documentElement.scrollLeft = 0
-    document.body.scrollLeft = 0
-    callback?.()
-    return
-  }
-
-  // Tangentbordet är uppe — vänta tills viewport höjden slutar växa
-  let stableCount = 0
-  let lastHeight = vp.height
-  const MAX_WAIT = 600 // ms max väntan
-
-  const check = () => {
-    if (vp.height === lastHeight) {
-      stableCount++
-    } else {
-      stableCount = 0
-      lastHeight = vp.height
-    }
-    // Stabil i 3 frames i rad → tangentbordet är nere
-    if (stableCount >= 3 || vp.height >= fullHeight * 0.85) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
-      document.documentElement.scrollLeft = 0
-      document.body.scrollLeft = 0
-      callback?.()
-    } else {
-      requestAnimationFrame(check)
-    }
-  }
-
-  // Starta check efter initial animation-frame
-  setTimeout(() => requestAnimationFrame(check), 50)
-  // Säkerhetsnät: kör alltid efter MAX_WAIT ms
-  setTimeout(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
-    document.documentElement.scrollLeft = 0
-    document.body.scrollLeft = 0
-    callback?.()
-  }, MAX_WAIT)
-}
-
 type Page = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings'
 type Modal = 'addEmployee' | 'editEmployee' | 'runPayroll' | 'employeeHistory' | null
 
-// ─── iOS VISUAL VIEWPORT HOOK ─────────────────────────────────────────────────
-
-interface Viewport {
-  width: number
-  height: number
-  offsetLeft: number
-  offsetTop: number
-}
-
-function useVisualViewport(): Viewport {
-  const getVp = (): Viewport => ({
-    width:      window.visualViewport?.width      ?? window.innerWidth,
-    height:     window.visualViewport?.height     ?? window.innerHeight,
-    offsetLeft: window.visualViewport?.offsetLeft ?? 0,
-    offsetTop:  window.visualViewport?.offsetTop  ?? 0,
-  })
-
-  const [vp, setVp] = useState<Viewport>(getVp)
-
-  useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
-    const update = () => setVp(getVp())
-    viewport.addEventListener('resize', update)
-    viewport.addEventListener('scroll', update)
-    return () => {
-      viewport.removeEventListener('resize', update)
-      viewport.removeEventListener('scroll', update)
-    }
-  }, [])
-
-  return vp
-}
-
 // ─── MODAL-WRAPPER ────────────────────────────────────────────────────────────
+// Enkel, stabil modal utan viewport-tracking.
+// position:fixed + inset:0 täcker alltid hela skärmen — #root är redan fixed
+// så det finns inget horisontellt att scrolla till.
+// Inga event listeners → ingen re-rendering vid tangentbordshändelser → inget hoppande.
 
 function ModalSheet({ onBackdropClick, children }: {
-  onBackdropClick?: () => void; children: React.ReactNode
+  onBackdropClick?: () => void
+  children: React.ReactNode
 }) {
-  const { width, height, offsetLeft, offsetTop } = useVisualViewport()
-
   return (
     <div
       style={{
-        position:        'fixed',
-        left:            offsetLeft,
-        top:             offsetTop,
-        width:           width,
-        height:          height,
+        position: 'fixed',
+        inset: 0,
         backgroundColor: 'rgba(0,0,0,0.75)',
-        zIndex:          50,
+        zIndex: 50,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
       }}
-      onClick={e => {
-        if (e.target === e.currentTarget) onBackdropClick?.()
-      }}
+      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}
     >
       <div
         style={{
-          position:                'absolute',
-          left:                    0,
-          right:                   0,
-          bottom:                  0,
-          backgroundColor:         '#0f172a',
-          borderTopLeftRadius:     '1.5rem',
-          borderTopRightRadius:    '1.5rem',
-          maxHeight:               height * 0.92,
-          overflowY:               'auto',
+          backgroundColor: '#0f172a',
+          borderTopLeftRadius: '1.5rem',
+          borderTopRightRadius: '1.5rem',
+          maxHeight: '92dvh',
+          overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
+          // Förhindra att iOS drar med sig containern horisontellt
+          overflowX: 'hidden',
         } as React.CSSProperties}
         onClick={e => e.stopPropagation()}
       >
@@ -525,17 +420,16 @@ function EmployeeModal({ employee, onSave, onClose }: {
   const handleSave = () => {
     if (!form.name.trim()) { alert('Ange namn på den anställde'); return }
     onSave({ ...form, id: employee?.id ?? generateId() })
-    resetScrollWhenKeyboardGone(onClose)
+    onClose()
   }
-  const handleClose = () => resetScrollWhenKeyboardGone(onClose)
   const actualSalary = calculateActualSalary(form.baseSalary, form.employmentDegree)
   return (
-    <ModalSheet onBackdropClick={handleClose}>
+    <ModalSheet onBackdropClick={onClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>{employee ? 'Redigera anställd' : 'Ny anställd'}</h2>
-          <button onClick={handleClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {[
           { key: 'name', label: 'Namn *', placeholder: 'Anna Andersson', type: 'text', autoFocus: true },
@@ -586,20 +480,22 @@ function PayrollModal({ employees, onRun, onClose }: {
   onClose: () => void
 }) {
   const [inputs, setInputs] = useState<Record<string, MonthlyInput>>(() =>
-    Object.fromEntries(employees.map(e => [e.id, { sickHoursDay1: 0, sickHoursOther: 0, overtimeHours1: 0, overtimeHours2: 0, extraHours: 0, vacationDays: 0 }])))
+    Object.fromEntries(employees.map(e => [e.id, {
+      sickHoursDay1: 0, sickHoursOther: 0,
+      overtimeHours1: 0, overtimeHours2: 0,
+      extraHours: 0, vacationDays: 0
+    }])))
+
   const setInput = (id: string, key: keyof MonthlyInput, value: number) =>
     setInputs(prev => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
 
-  const handleClose = () => resetScrollWhenKeyboardGone(onClose)
-  const handleRun   = () => resetScrollWhenKeyboardGone(() => onRun(inputs))
-
   return (
-    <ModalSheet onBackdropClick={handleClose}>
+    <ModalSheet onBackdropClick={onClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>Kör lön · {currentMonth()}</h2>
-          <button onClick={handleClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {employees.map(emp => {
           const inp = inputs[emp.id]
@@ -608,23 +504,36 @@ function PayrollModal({ employees, onRun, onClose }: {
               <p className="text-white font-semibold text-sm mb-3">{emp.name}</p>
               <div className="grid grid-cols-2 gap-3">
                 {([
-                  ['sickHoursDay1', 'Sjuktimmar dag 1'], ['sickHoursOther', 'Sjuktimmar övriga'],
-                  ['overtimeHours1', 'Övertid vardagar'], ['overtimeHours2', 'Övertid kväll/helg'],
-                  ['extraHours', 'Mertid'], ['vacationDays', 'Semesterdagar'],
+                  ['sickHoursDay1',  'Sjuktimmar dag 1'],
+                  ['sickHoursOther', 'Sjuktimmar övriga'],
+                  ['overtimeHours1', 'Övertid vardagar'],
+                  ['overtimeHours2', 'Övertid kväll/helg'],
+                  ['extraHours',     'Mertid'],
+                  ['vacationDays',   'Semesterdagar'],
                 ] as const).map(([key, label]) => (
                   <div key={key}>
                     <label className="text-slate-500 text-xs block mb-1">{label}</label>
-                    <input type="number" min="0" step="0.5" value={inp?.[key] ?? 0} inputMode="decimal"
+                    <input
+                      type="number" min="0" step="0.5"
+                      value={inp?.[key] ?? 0}
+                      inputMode="decimal"
                       onChange={e => setInput(emp.id, key, Number(e.target.value))}
                       className="w-full rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none"
-                      style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                      style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}
+                    />
                   </div>
                 ))}
               </div>
             </div>
           )
         })}
-        <button onClick={handleRun} className="w-full py-4 rounded-2xl font-bold text-white mt-2" style={{ backgroundColor: '#3b82f6' }}>Beräkna och spara</button>
+        <button
+          onClick={() => onRun(inputs)}
+          className="w-full py-4 rounded-2xl font-bold text-white mt-2"
+          style={{ backgroundColor: '#3b82f6' }}
+        >
+          Beräkna och spara
+        </button>
       </div>
     </ModalSheet>
   )
@@ -667,7 +576,9 @@ export default function App() {
 
   const handleRunPayroll = async (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
-    await Promise.all(employees.map(emp => savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month))))
+    await Promise.all(employees.map(emp =>
+      savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month))
+    ))
     closeModal()
     await reload()
     setPage('dashboard')
@@ -683,7 +594,10 @@ export default function App() {
     setEmployer(emp)
   }
 
-  const goToEmployees = () => { setPage('employees'); setTimeout(() => setModal('addEmployee'), 100) }
+  const goToEmployees = () => {
+    setPage('employees')
+    setTimeout(() => setModal('addEmployee'), 100)
+  }
 
   const nav = [
     { key: 'dashboard' as Page, icon: TrendingUp, label: 'Hem' },
@@ -694,8 +608,8 @@ export default function App() {
   ]
 
   return (
-    <div style={{ backgroundColor: '#0a0f1e', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-      <main style={{ flex: 1, position: 'relative', overflow: 'hidden', height: 'calc(100dvh - 65px)' }}>
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: '#0a0f1e', display: 'flex', flexDirection: 'column' }}>
+      <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {page === 'dashboard' && <DashboardPage employees={employees} payroll={payroll} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
         {page === 'employees' && <EmployeesPage employees={employees} payroll={payroll} onAdd={() => { setEditEmployee(undefined); setModal('addEmployee') }} onEdit={e => { setEditEmployee(e); setModal('editEmployee') }} onDelete={handleDeleteEmployee} onHistory={e => { setHistoryEmployee(e); setModal('employeeHistory') }} />}
         {page === 'payroll'   && <DashboardPage employees={employees} payroll={payroll} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
@@ -703,7 +617,7 @@ export default function App() {
         {page === 'settings'  && <SettingsPage employer={employer} onSave={handleSaveEmployer} />}
       </main>
 
-      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(15,23,42,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', zIndex: 40 }}>
+      <nav style={{ backgroundColor: 'rgba(15,23,42,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', flexShrink: 0 }}>
         <div className="flex justify-around px-2">
           {nav.map(({ key, icon, label }) => (
             <NavItem key={key} icon={icon} label={label} active={page === key}
