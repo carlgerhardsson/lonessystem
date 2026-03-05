@@ -27,6 +27,11 @@ html, body, #root {
   color: var(--text);
   font-family: 'Inter', sans-serif;
   overscroll-behavior: none;
+
+  /* Förhindra horisontell scroll — iOS kan annars panorera layoutvyn
+     när tangentbordet öppnas och lämna kvar en offset efteråt */
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 /* Mjuk scroll för iPhone */
