@@ -1,7 +1,7 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Fix: visualViewport offsetLeft spåras nu → modal centreras korrekt när tangentbord är uppe
+// Fix: återställ window scroll när modal stängs → eliminerar horisontell förskjutning på alla sidor
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Users, Calculator, FileText, Settings, Plus, ChevronRight,
   TrendingUp, AlertCircle, CheckCircle, Download, Trash2, Edit3, X,
@@ -35,14 +35,23 @@ const currentMonth = () => {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// ─── ÅTERSTÄLL SCROLL EFTER TANGENTBORD ───────────────────────────────────────
+// iOS panorerar ibland layout-viewport horisontellt när tangentbord öppnas.
+// När tangentbordet stängs återgår visualViewport men window.scrollX kan hänga kvar.
+// Denna funktion tvingar tillbaka scrollpositionen till origo.
+const resetWindowScroll = () => {
+  window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+  document.documentElement.scrollLeft = 0
+  document.body.scrollLeft = 0
+}
+
 type Page = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings'
 type Modal = 'addEmployee' | 'editEmployee' | 'runPayroll' | 'employeeHistory' | null
 
 // ─── iOS VISUAL VIEWPORT HOOK ─────────────────────────────────────────────────
-// Spårar ALLA fyra värden från visualViewport:
-//   - width/height: faktiskt synlig yta (exkl. tangentbord)
-//   - offsetLeft/offsetTop: förskjutning när iOS panorerar viewporten
-// Utan offsetLeft hamnar modalen utanför skärmen till vänster när tangentbordet är uppe.
+// Spårar alla fyra viewport-värden inkl. offsetLeft (horisontell förskjutning).
+// Återställer även window scroll automatiskt när tangentbordet stängs
+// (dvs när visualViewport återgår till full bredd).
 
 interface Viewport {
   width: number
@@ -64,7 +73,19 @@ function useVisualViewport(): Viewport {
   useEffect(() => {
     const viewport = window.visualViewport
     if (!viewport) return
-    const update = () => setVp(getVp())
+
+    let prevHeight = viewport.height
+
+    const update = () => {
+      const next = getVp()
+      // Om höjden ökar → tangentbordet stängdes → återställ horisontell scroll
+      if (next.height > prevHeight) {
+        resetWindowScroll()
+      }
+      prevHeight = next.height
+      setVp(next)
+    }
+
     viewport.addEventListener('resize', update)
     viewport.addEventListener('scroll', update)
     return () => {
@@ -77,9 +98,8 @@ function useVisualViewport(): Viewport {
 }
 
 // ─── MODAL-WRAPPER ────────────────────────────────────────────────────────────
-// Overlay täcker exakt den synliga ytan (offsetLeft + width, offsetTop + height).
-// Sheet positioneras mot botten av den synliga ytan.
-// Detta eliminerar den horisontella förskjutningen när iOS-tangentbordet öppnas.
+// Overlay täcker exakt den synliga ytan via offsetLeft/offsetTop.
+// onClose återställer alltid scroll så sidor bakom aldrig är förskjutna.
 
 function ModalSheet({ onBackdropClick, children }: {
   onBackdropClick?: () => void; children: React.ReactNode
@@ -89,8 +109,7 @@ function ModalSheet({ onBackdropClick, children }: {
   return (
     <div
       style={{
-        position: 'fixed',
-        // Täck exakt den synliga ytan — kompensera för iOS viewport-panorering
+        position:        'fixed',
         left:            offsetLeft,
         top:             offsetTop,
         width:           width,
@@ -98,7 +117,12 @@ function ModalSheet({ onBackdropClick, children }: {
         backgroundColor: 'rgba(0,0,0,0.75)',
         zIndex:          50,
       }}
-      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}
+      onClick={e => {
+        if (e.target === e.currentTarget) {
+          resetWindowScroll()
+          onBackdropClick?.()
+        }
+      }}
     >
       <div
         style={{
@@ -163,8 +187,10 @@ function EmployeeHistoryModal({ employee, onClose }: { employee: Employee; onClo
   const totalNet   = history.reduce((s, r) => s + r.netSalary, 0)
   const totalGross = history.reduce((s, r) => s + r.grossSalary, 0)
 
+  const handleClose = () => { resetWindowScroll(); onClose() }
+
   return (
-    <ModalSheet onBackdropClick={onClose}>
+    <ModalSheet onBackdropClick={handleClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
@@ -175,7 +201,7 @@ function EmployeeHistoryModal({ employee, onClose }: { employee: Employee; onClo
               <p className="text-slate-400 text-xs">{kr(calculateActualSalary(employee.baseSalary, employee.employmentDegree))}/mån · {Math.round(employee.employmentDegree * 100)}%</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={handleClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {history.length === 0 ? (
           <div className="py-10 text-center">
@@ -461,14 +487,15 @@ function EmployeeModal({ employee, onSave, onClose }: {
     if (!form.name.trim()) { alert('Ange namn på den anställde'); return }
     onSave({ ...form, id: employee?.id ?? generateId() }); onClose()
   }
+  const handleClose = () => { resetWindowScroll(); onClose() }
   const actualSalary = calculateActualSalary(form.baseSalary, form.employmentDegree)
   return (
-    <ModalSheet onBackdropClick={onClose}>
+    <ModalSheet onBackdropClick={handleClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>{employee ? 'Redigera anställd' : 'Ny anställd'}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={handleClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {[
           { key: 'name', label: 'Namn *', placeholder: 'Anna Andersson', type: 'text', autoFocus: true },
@@ -522,13 +549,17 @@ function PayrollModal({ employees, onRun, onClose }: {
     Object.fromEntries(employees.map(e => [e.id, { sickHoursDay1: 0, sickHoursOther: 0, overtimeHours1: 0, overtimeHours2: 0, extraHours: 0, vacationDays: 0 }])))
   const setInput = (id: string, key: keyof MonthlyInput, value: number) =>
     setInputs(prev => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
+
+  const handleClose = () => { resetWindowScroll(); onClose() }
+  const handleRun = (inp: Record<string, MonthlyInput>) => { resetWindowScroll(); onRun(inp) }
+
   return (
-    <ModalSheet>
+    <ModalSheet onBackdropClick={handleClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>Kör lön · {currentMonth()}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={handleClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {employees.map(emp => {
           const inp = inputs[emp.id]
@@ -553,7 +584,7 @@ function PayrollModal({ employees, onRun, onClose }: {
             </div>
           )
         })}
-        <button onClick={() => onRun(inputs)} className="w-full py-4 rounded-2xl font-bold text-white mt-2" style={{ backgroundColor: '#3b82f6' }}>Beräkna och spara</button>
+        <button onClick={() => handleRun(inputs)} className="w-full py-4 rounded-2xl font-bold text-white mt-2" style={{ backgroundColor: '#3b82f6' }}>Beräkna och spara</button>
       </div>
     </ModalSheet>
   )
@@ -580,6 +611,12 @@ export default function App() {
 
   useEffect(() => { reload() }, [])
 
+  // Återställ scroll varje gång modal stängs
+  const closeModal = useCallback(() => {
+    resetWindowScroll()
+    setModal(null)
+  }, [])
+
   const handleSaveEmployee = async (emp: Employee) => {
     await saveEmployee(emp)
     setEmployees(await getEmployees())
@@ -595,7 +632,7 @@ export default function App() {
   const handleRunPayroll = async (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
     await Promise.all(employees.map(emp => savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month))))
-    setModal(null)
+    closeModal()
     await reload()
     setPage('dashboard')
   }
@@ -640,13 +677,13 @@ export default function App() {
       </nav>
 
       {(modal === 'addEmployee' || modal === 'editEmployee') && (
-        <EmployeeModal employee={editEmployee} onSave={handleSaveEmployee} onClose={() => setModal(null)} />
+        <EmployeeModal employee={editEmployee} onSave={handleSaveEmployee} onClose={closeModal} />
       )}
       {modal === 'runPayroll' && employees.length > 0 && (
-        <PayrollModal employees={employees} onRun={handleRunPayroll} onClose={() => setModal(null)} />
+        <PayrollModal employees={employees} onRun={handleRunPayroll} onClose={closeModal} />
       )}
       {modal === 'employeeHistory' && historyEmployee && (
-        <EmployeeHistoryModal employee={historyEmployee} onClose={() => setModal(null)} />
+        <EmployeeHistoryModal employee={historyEmployee} onClose={closeModal} />
       )}
     </div>
   )
