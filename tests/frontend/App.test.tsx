@@ -23,59 +23,62 @@ const makeEmployee = (overrides: Partial<Employee> = {}): Employee => ({
 beforeEach(() => localStorage.clear())
 
 describe('Anställda — CRUD', () => {
-  it('returnerar tom lista', () => {
-    expect(getEmployees()).toEqual([])
+  it('returnerar tom lista', async () => {
+    expect(await getEmployees()).toEqual([])
   })
 
-  it('sparar och hämtar en anställd', () => {
+  it('sparar och hämtar en anställd', async () => {
     const emp = makeEmployee()
-    saveEmployee(emp)
-    expect(getEmployees()).toHaveLength(1)
-    expect(getEmployees()[0].name).toBe('Anna Andersson')
+    await saveEmployee(emp)
+    const result = await getEmployees()
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('Anna Andersson')
   })
 
-  it('uppdaterar befintlig anställd', () => {
+  it('uppdaterar befintlig anställd', async () => {
     const emp = makeEmployee()
-    saveEmployee(emp)
-    saveEmployee({ ...emp, baseSalary: 50000 })
-    expect(getEmployees()).toHaveLength(1)
-    expect(getEmployees()[0].baseSalary).toBe(50000)
+    await saveEmployee(emp)
+    await saveEmployee({ ...emp, baseSalary: 50000 })
+    const result = await getEmployees()
+    expect(result).toHaveLength(1)
+    expect(result[0].baseSalary).toBe(50000)
   })
 
-  it('sparar flera anställda', () => {
-    saveEmployee(makeEmployee({ id: 'e1', name: 'Anna' }))
-    saveEmployee(makeEmployee({ id: 'e2', name: 'Björn' }))
-    expect(getEmployees()).toHaveLength(2)
+  it('sparar flera anställda', async () => {
+    await saveEmployee(makeEmployee({ id: 'e1', name: 'Anna' }))
+    await saveEmployee(makeEmployee({ id: 'e2', name: 'Björn' }))
+    expect(await getEmployees()).toHaveLength(2)
   })
 
-  it('tar bort rätt anställd', () => {
-    saveEmployee(makeEmployee({ id: 'e1', name: 'Behåll' }))
-    saveEmployee(makeEmployee({ id: 'e2', name: 'Ta bort' }))
-    deleteEmployee('e2')
-    const result = getEmployees()
+  it('tar bort rätt anställd', async () => {
+    await saveEmployee(makeEmployee({ id: 'e1', name: 'Behåll' }))
+    await saveEmployee(makeEmployee({ id: 'e2', name: 'Ta bort' }))
+    await deleteEmployee('e2')
+    const result = await getEmployees()
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('Behåll')
   })
 })
 
 describe('Arbetsgivare', () => {
-  it('returnerar null när inget är sparat', () => {
-    expect(getEmployer()).toBeNull()
+  it('returnerar null när inget är sparat', async () => {
+    expect(await getEmployer()).toBeNull()
   })
 
-  it('sparar och hämtar arbetsgivarinfo', () => {
-    saveEmployer({ orgNr: '556123-4567', name: 'Test AB', bankAccount: 'SE00', taxColumn: 33 })
-    expect(getEmployer()?.name).toBe('Test AB')
+  it('sparar och hämtar arbetsgivarinfo', async () => {
+    await saveEmployer({ orgNr: '556123-4567', name: 'Test AB', bankAccount: 'SE00', taxColumn: 33 })
+    const result = await getEmployer()
+    expect(result?.name).toBe('Test AB')
   })
 })
 
 describe('Lönehistorik', () => {
-  it('returnerar tom lista', () => {
-    expect(getPayrollHistory()).toEqual([])
+  it('returnerar tom lista', async () => {
+    expect(await getPayrollHistory()).toEqual([])
   })
 
-  it('sparar löneresultat', () => {
-    savePayrollResult({
+  it('sparar löneresultat', async () => {
+    await savePayrollResult({
       employeeId: 'e1', month: '202603',
       baseSalary: 40000, actualSalary: 40000,
       sickLeaveDeduction: 0, sickPay: 0, karensDeduction: 0,
@@ -83,7 +86,7 @@ describe('Lönehistorik', () => {
       grossSalary: 40000, incomeTax: 8800, netSalary: 31200,
       employerFee: 12568, itp1: 1800,
     })
-    expect(getPayrollHistory()).toHaveLength(1)
+    expect(await getPayrollHistory()).toHaveLength(1)
   })
 })
 

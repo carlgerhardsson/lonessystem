@@ -1,7 +1,7 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Fix: iOS-tangentbord krymper inte längre modaler (visualViewport hook)
+// Fix: async store-anrop + borttagna oanvända importer
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Users, Calculator, FileText, Settings, Plus, ChevronRight,
   TrendingUp, AlertCircle, CheckCircle, Download, Trash2, Edit3, X,
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   calculateActualSalary, calculateMonthlyPayroll,
-  type Employee, type MonthlyInput
+  type Employee, type MonthlyInput, type PayrollResult
 } from './engine/calculations'
 import {
   getEmployees, saveEmployee, deleteEmployee, generateId,
@@ -39,8 +39,6 @@ type Page = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings'
 type Modal = 'addEmployee' | 'editEmployee' | 'runPayroll' | 'employeeHistory' | null
 
 // ─── iOS VISUAL VIEWPORT HOOK ─────────────────────────────────────────────────
-// Löser problemet att iOS-tangentbordet krymper modaler.
-// visualViewport spårar den faktiskt synliga ytan (exkl. tangentbord).
 
 function useVisualViewport() {
   const [vpHeight, setVpHeight] = useState<number>(
@@ -49,61 +47,32 @@ function useVisualViewport() {
   const [vpOffsetTop, setVpOffsetTop] = useState<number>(
     () => window.visualViewport?.offsetTop ?? 0
   )
-
   useEffect(() => {
     const vp = window.visualViewport
     if (!vp) return
-
-    const update = () => {
-      setVpHeight(vp.height)
-      setVpOffsetTop(vp.offsetTop)
-    }
-
+    const update = () => { setVpHeight(vp.height); setVpOffsetTop(vp.offsetTop) }
     vp.addEventListener('resize', update)
     vp.addEventListener('scroll', update)
-    return () => {
-      vp.removeEventListener('resize', update)
-      vp.removeEventListener('scroll', update)
-    }
+    return () => { vp.removeEventListener('resize', update); vp.removeEventListener('scroll', update) }
   }, [])
-
   return { vpHeight, vpOffsetTop }
 }
 
 // ─── MODAL-WRAPPER ────────────────────────────────────────────────────────────
-// Använder visualViewport för att hålla modalen synlig när tangentbordet är uppe.
-// Overlay täcker hela skärmen, sheet positioneras mot botten av synlig yta.
 
 function ModalSheet({ onBackdropClick, children }: {
-  onBackdropClick?: () => void
-  children: React.ReactNode
+  onBackdropClick?: () => void; children: React.ReactNode
 }) {
   const { vpHeight, vpOffsetTop } = useVisualViewport()
-
   return (
-    <div
-      className="fixed inset-0 z-50"
-      style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
-      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          // Placera sheeten mot botten av den synliga ytan (ovanför tangentbordet)
-          top: vpOffsetTop + vpHeight,
-          transform: 'translateY(-100%)',
-          backgroundColor: '#0f172a',
-          borderTopLeftRadius: '1.5rem',
-          borderTopRightRadius: '1.5rem',
-          // Maxhöjd baseras på faktisk synlig yta, inte vh
-          maxHeight: vpHeight * 0.92,
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
-        } as React.CSSProperties}
-        onClick={e => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
+      onClick={e => { if (e.target === e.currentTarget) onBackdropClick?.() }}>
+      <div style={{
+        position: 'absolute', left: 0, right: 0,
+        top: vpOffsetTop + vpHeight, transform: 'translateY(-100%)',
+        backgroundColor: '#0f172a', borderTopLeftRadius: '1.5rem', borderTopRightRadius: '1.5rem',
+        maxHeight: vpHeight * 0.92, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+      } as React.CSSProperties} onClick={e => e.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -136,9 +105,7 @@ function NavItem({ icon: Icon, label, active, onClick }: {
 }) {
   return (
     <button onClick={onClick} style={{ WebkitTapHighlightColor: 'transparent' }}
-      className={`flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl transition-all ${
-        active ? 'text-blue-400' : 'text-slate-500'
-      }`}>
+      className={`flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl transition-all ${active ? 'text-blue-400' : 'text-slate-500'}`}>
       <Icon size={22} strokeWidth={active ? 2.5 : 1.8} />
       <span className="text-[10px] font-medium">{label}</span>
     </button>
@@ -147,10 +114,9 @@ function NavItem({ icon: Icon, label, active, onClick }: {
 
 // ─── MODAL: HISTORIKVY PER ANSTÄLLD ──────────────────────────────────────────
 
-function EmployeeHistoryModal({ employee, onClose }: {
-  employee: Employee; onClose: () => void
-}) {
-  const history = getPayrollForEmployee(employee.id)
+function EmployeeHistoryModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const [history, setHistory] = useState<PayrollResult[]>([])
+  useEffect(() => { getPayrollForEmployee(employee.id).then(setHistory) }, [employee.id])
   const initials = employee.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
   const totalNet   = history.reduce((s, r) => s + r.netSalary, 0)
   const totalGross = history.reduce((s, r) => s + r.grossSalary, 0)
@@ -161,22 +127,14 @@ function EmployeeHistoryModal({ employee, onClose }: {
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500/40 to-indigo-600/40 flex items-center justify-center text-white font-bold text-sm">
-              {initials}
-            </div>
+            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500/40 to-indigo-600/40 flex items-center justify-center text-white font-bold text-sm">{initials}</div>
             <div>
-              <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
-                {employee.name}
-              </h2>
-              <p className="text-slate-400 text-xs">
-                {kr(calculateActualSalary(employee.baseSalary, employee.employmentDegree))}/mån · {Math.round(employee.employmentDegree * 100)}%
-              </p>
+              <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>{employee.name}</h2>
+              <p className="text-slate-400 text-xs">{kr(calculateActualSalary(employee.baseSalary, employee.employmentDegree))}/mån · {Math.round(employee.employmentDegree * 100)}%</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400"
-            style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
-
         {history.length === 0 ? (
           <div className="py-10 text-center">
             <History size={36} className="text-slate-600 mx-auto mb-3" />
@@ -225,14 +183,13 @@ function EmployeeHistoryModal({ employee, onClose }: {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
-function DashboardPage({ employees, onRunPayroll, onGoToEmployees, onDeletePayroll }: {
-  employees: Employee[]
-  onRunPayroll: () => void
-  onGoToEmployees: () => void
+function DashboardPage({ employees, payroll, onRunPayroll, onGoToEmployees, onDeletePayroll }: {
+  employees: Employee[]; payroll: PayrollResult[]
+  onRunPayroll: () => void; onGoToEmployees: () => void
   onDeletePayroll: (employeeId: string, month: string) => void
 }) {
   const month = currentMonth()
-  const results = getPayrollForMonth(month)
+  const results = payroll.filter(r => r.month === month)
   const totalGross = results.reduce((s, r) => s + r.grossSalary, 0)
   const totalNet   = results.reduce((s, r) => s + r.netSalary, 0)
   const totalCost  = results.reduce((s, r) => s + r.grossSalary + r.employerFee, 0)
@@ -254,10 +211,7 @@ function DashboardPage({ employees, onRunPayroll, onGoToEmployees, onDeletePayro
         <button onClick={onGoToEmployees} className="w-full glass-card border-blue-500/30 bg-blue-500/10 py-5 px-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center"><Users size={20} className="text-blue-400" /></div>
-            <div className="text-left">
-              <p className="text-white font-semibold text-sm">Lägg till anställd</p>
-              <p className="text-slate-400 text-xs">Kom igång med ditt lönesystem</p>
-            </div>
+            <div className="text-left"><p className="text-white font-semibold text-sm">Lägg till anställd</p><p className="text-slate-400 text-xs">Kom igång med ditt lönesystem</p></div>
           </div>
           <ChevronRight size={18} className="text-slate-400" />
         </button>
@@ -267,10 +221,7 @@ function DashboardPage({ employees, onRunPayroll, onGoToEmployees, onDeletePayro
             <button onClick={onRunPayroll} className="w-full glass-card border-blue-500/30 bg-blue-500/10 py-4 px-5 flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center"><Calculator size={20} className="text-blue-400" /></div>
-                <div className="text-left">
-                  <p className="text-white font-semibold text-sm">Kör lön</p>
-                  <p className="text-slate-400 text-xs">Beräkna månadsutbetalning</p>
-                </div>
+                <div className="text-left"><p className="text-white font-semibold text-sm">Kör lön</p><p className="text-slate-400 text-xs">Beräkna månadsutbetalning</p></div>
               </div>
               <ChevronRight size={18} className="text-slate-400" />
             </button>
@@ -308,12 +259,10 @@ function DashboardPage({ employees, onRunPayroll, onGoToEmployees, onDeletePayro
 
 // ─── ANSTÄLLDA ────────────────────────────────────────────────────────────────
 
-function EmployeesPage({ employees, onAdd, onEdit, onDelete, onHistory }: {
-  employees: Employee[]
-  onAdd: () => void
-  onEdit: (e: Employee) => void
-  onDelete: (id: string) => void
-  onHistory: (e: Employee) => void
+function EmployeesPage({ employees, payroll, onAdd, onEdit, onDelete, onHistory }: {
+  employees: Employee[]; payroll: PayrollResult[]
+  onAdd: () => void; onEdit: (e: Employee) => void
+  onDelete: (id: string) => void; onHistory: (e: Employee) => void
 }) {
   return (
     <div className="overflow-y-auto h-full px-4 pb-28" style={{ WebkitOverflowScrolling: 'touch' }}>
@@ -337,11 +286,10 @@ function EmployeesPage({ employees, onAdd, onEdit, onDelete, onHistory }: {
       ) : (
         <div className="space-y-3">
           {employees.map(emp => {
-            const history = getPayrollForEmployee(emp.id)
+            const historyCount = payroll.filter(r => r.employeeId === emp.id).length
             return (
               <div key={emp.id} className="glass-card p-4">
-                <button onClick={() => onHistory(emp)} style={{ WebkitTapHighlightColor: 'transparent' }}
-                  className="w-full flex items-center gap-3 text-left">
+                <button onClick={() => onHistory(emp)} style={{ WebkitTapHighlightColor: 'transparent' }} className="w-full flex items-center gap-3 text-left">
                   <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500/40 to-indigo-600/40 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
@@ -349,10 +297,8 @@ function EmployeesPage({ employees, onAdd, onEdit, onDelete, onHistory }: {
                     <p className="text-white font-semibold text-sm">{emp.name}</p>
                     <p className="text-slate-400 text-xs">{kr(calculateActualSalary(emp.baseSalary, emp.employmentDegree))}/mån · {Math.round(emp.employmentDegree * 100)}%</p>
                   </div>
-                  {history.length > 0 && (
-                    <div className="flex items-center gap-1 text-slate-500">
-                      <History size={13} /><span className="text-xs">{history.length}</span>
-                    </div>
+                  {historyCount > 0 && (
+                    <div className="flex items-center gap-1 text-slate-500"><History size={13} /><span className="text-xs">{historyCount}</span></div>
                   )}
                 </button>
                 <div className="flex gap-2 mt-3 pt-3 border-t border-slate-700/40">
@@ -374,9 +320,9 @@ function EmployeesPage({ employees, onAdd, onEdit, onDelete, onHistory }: {
 
 // ─── RAPPORTER ────────────────────────────────────────────────────────────────
 
-function ReportsPage({ employees, employer }: { employees: Employee[]; employer: Employer | null }) {
+function ReportsPage({ employees, employer, payroll }: { employees: Employee[]; employer: Employer | null; payroll: PayrollResult[] }) {
   const month = currentMonth()
-  const results = getPayrollForMonth(month)
+  const results = payroll.filter(r => r.month === month)
   const handleDownload = (type: 'agi' | 'pain' | 'sie') => {
     if (!employer) { alert('Ange arbetsgivaruppgifter i Inställningar'); return }
     if (results.length === 0) { alert('Kör lön för månaden först'); return }
@@ -474,24 +420,20 @@ function EmployeeModal({ employee, onSave, onClose }: {
     onSave({ ...form, id: employee?.id ?? generateId() }); onClose()
   }
   const actualSalary = calculateActualSalary(form.baseSalary, form.employmentDegree)
-
   return (
     <ModalSheet onBackdropClick={onClose}>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
-            {employee ? 'Redigera anställd' : 'Ny anställd'}
-          </h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400"
-            style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>{employee ? 'Redigera anställd' : 'Ny anställd'}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {[
-          { key: 'name',         label: 'Namn *',             placeholder: 'Anna Andersson', type: 'text',   autoFocus: true },
-          { key: 'personnummer', label: 'Personnummer',        placeholder: '19900101-1234',  type: 'text' },
-          { key: 'baseSalary',   label: 'Grundlön (kr/mån)',  placeholder: '35000',          type: 'number' },
-          { key: 'weeklyHours',  label: 'Veckoarbetstid (h)', placeholder: '40',             type: 'number' },
-          { key: 'startDate',    label: 'Startdatum',         placeholder: '',               type: 'date' },
+          { key: 'name', label: 'Namn *', placeholder: 'Anna Andersson', type: 'text', autoFocus: true },
+          { key: 'personnummer', label: 'Personnummer', placeholder: '19900101-1234', type: 'text' },
+          { key: 'baseSalary', label: 'Grundlön (kr/mån)', placeholder: '35000', type: 'number' },
+          { key: 'weeklyHours', label: 'Veckoarbetstid (h)', placeholder: '40', type: 'number' },
+          { key: 'startDate', label: 'Startdatum', placeholder: '', type: 'date' },
         ].map(({ key, label, placeholder, type, autoFocus }) => (
           <div key={key} className="mb-4">
             <label className="text-xs text-slate-400 font-medium block mb-1.5">{label}</label>
@@ -511,8 +453,7 @@ function EmployeeModal({ employee, onSave, onClose }: {
           <span className="text-slate-300 text-sm">Övertidsberättigad</span>
           <button onClick={() => setForm({ ...form, overtimeEligible: !form.overtimeEligible })}
             className="relative w-12 h-6 rounded-full transition-colors" style={{ backgroundColor: form.overtimeEligible ? '#3b82f6' : '#475569' }}>
-            <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
-              style={{ transform: form.overtimeEligible ? 'translateX(26px)' : 'translateX(2px)' }} />
+            <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform" style={{ transform: form.overtimeEligible ? 'translateX(26px)' : 'translateX(2px)' }} />
           </button>
         </div>
         <div className="p-4 rounded-xl mb-5" style={{ backgroundColor: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
@@ -535,23 +476,16 @@ function PayrollModal({ employees, onRun, onClose }: {
   onClose: () => void
 }) {
   const [inputs, setInputs] = useState<Record<string, MonthlyInput>>(() =>
-    Object.fromEntries(employees.map(e => [e.id, {
-      sickHoursDay1: 0, sickHoursOther: 0, overtimeHours1: 0,
-      overtimeHours2: 0, extraHours: 0, vacationDays: 0,
-    }])))
+    Object.fromEntries(employees.map(e => [e.id, { sickHoursDay1: 0, sickHoursOther: 0, overtimeHours1: 0, overtimeHours2: 0, extraHours: 0, vacationDays: 0 }])))
   const setInput = (id: string, key: keyof MonthlyInput, value: number) =>
     setInputs(prev => ({ ...prev, [id]: { ...prev[id], [key]: value } }))
-
   return (
     <ModalSheet>
       <div className="p-5 pb-10">
         <div className="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-5" />
         <div className="flex justify-between items-center mb-5">
-          <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>
-            Kör lön · {currentMonth()}
-          </h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400"
-            style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
+          <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Syne, sans-serif' }}>Kör lön · {currentMonth()}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400" style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}><X size={16} /></button>
         </div>
         {employees.map(emp => {
           const inp = inputs[emp.id]
@@ -560,19 +494,14 @@ function PayrollModal({ employees, onRun, onClose }: {
               <p className="text-white font-semibold text-sm mb-3">{emp.name}</p>
               <div className="grid grid-cols-2 gap-3">
                 {([
-                  ['sickHoursDay1',  'Sjuktimmar dag 1'],
-                  ['sickHoursOther', 'Sjuktimmar övriga'],
-                  ['overtimeHours1', 'Övertid vardagar'],
-                  ['overtimeHours2', 'Övertid kväll/helg'],
-                  ['extraHours',     'Mertid'],
-                  ['vacationDays',   'Semesterdagar'],
+                  ['sickHoursDay1', 'Sjuktimmar dag 1'], ['sickHoursOther', 'Sjuktimmar övriga'],
+                  ['overtimeHours1', 'Övertid vardagar'], ['overtimeHours2', 'Övertid kväll/helg'],
+                  ['extraHours', 'Mertid'], ['vacationDays', 'Semesterdagar'],
                 ] as const).map(([key, label]) => (
                   <div key={key}>
                     <label className="text-slate-500 text-xs block mb-1">{label}</label>
-                    <input type="number" min="0" step="0.5" value={inp?.[key] ?? 0}
+                    <input type="number" min="0" step="0.5" value={inp?.[key] ?? 0} inputMode="decimal"
                       onChange={e => setInput(emp.id, key, Number(e.target.value))}
-                      // inputMode="decimal" ger numpad utan "Done"-knapp som gömmer tangentbordet på iOS
-                      inputMode="decimal"
                       className="w-full rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none"
                       style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }} />
                   </div>
@@ -581,8 +510,7 @@ function PayrollModal({ employees, onRun, onClose }: {
             </div>
           )
         })}
-        <button onClick={() => onRun(inputs)} className="w-full py-4 rounded-2xl font-bold text-white mt-2"
-          style={{ backgroundColor: '#3b82f6' }}>Beräkna och spara</button>
+        <button onClick={() => onRun(inputs)} className="w-full py-4 rounded-2xl font-bold text-white mt-2" style={{ backgroundColor: '#3b82f6' }}>Beräkna och spara</button>
       </div>
     </ModalSheet>
   )
@@ -596,23 +524,50 @@ export default function App() {
   const [editEmployee, setEditEmployee]       = useState<Employee | undefined>()
   const [historyEmployee, setHistoryEmployee] = useState<Employee | undefined>()
   const [employees, setEmployees]             = useState<Employee[]>([])
+  const [payroll, setPayroll]                 = useState<PayrollResult[]>([])
   const [employer, setEmployer]               = useState<Employer | null>(null)
-  const [, forceUpdate]                       = useState(0)
 
-  useEffect(() => { setEmployees(getEmployees()); setEmployer(getEmployer()) }, [])
-
-  const handleSaveEmployee = (emp: Employee) => { saveEmployee(emp); setEmployees(getEmployees()) }
-  const handleDeleteEmployee = (id: string) => {
-    if (window.confirm('Ta bort anställd?')) { deleteEmployee(id); setEmployees(getEmployees()) }
+  const reload = async () => {
+    const [emps, pay, emp] = await Promise.all([getEmployees(), getPayrollForMonth(''), getEmployer()])
+    setEmployees(emps)
+    // Ladda hela historiken för dashboard och personal-badges
+    const { getPayrollHistory } = await import('./store')
+    setPayroll(await getPayrollHistory())
+    setEmployer(emp)
   }
-  const handleRunPayroll = (inputs: Record<string, MonthlyInput>) => {
+
+  useEffect(() => { reload() }, [])
+
+  const handleSaveEmployee = async (emp: Employee) => {
+    await saveEmployee(emp)
+    setEmployees(await getEmployees())
+  }
+
+  const handleDeleteEmployee = async (id: string) => {
+    if (window.confirm('Ta bort anställd?')) {
+      await deleteEmployee(id)
+      setEmployees(await getEmployees())
+    }
+  }
+
+  const handleRunPayroll = async (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
-    employees.forEach(emp => savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month)))
-    setModal(null); forceUpdate(n => n + 1); setPage('dashboard')
+    await Promise.all(employees.map(emp => savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month))))
+    setModal(null)
+    await reload()
+    setPage('dashboard')
   }
-  const handleDeletePayroll = (employeeId: string, month: string) => {
-    deletePayrollResult(employeeId, month); forceUpdate(n => n + 1)
+
+  const handleDeletePayroll = async (employeeId: string, month: string) => {
+    await deletePayrollResult(employeeId, month)
+    await reload()
   }
+
+  const handleSaveEmployer = async (emp: Employer) => {
+    await saveEmployer(emp)
+    setEmployer(emp)
+  }
+
   const goToEmployees = () => { setPage('employees'); setTimeout(() => setModal('addEmployee'), 100) }
 
   const nav = [
@@ -626,11 +581,11 @@ export default function App() {
   return (
     <div style={{ backgroundColor: '#0a0f1e', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden', height: 'calc(100dvh - 65px)' }}>
-        {page === 'dashboard' && <DashboardPage employees={employees} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
-        {page === 'employees' && <EmployeesPage employees={employees} onAdd={() => { setEditEmployee(undefined); setModal('addEmployee') }} onEdit={e => { setEditEmployee(e); setModal('editEmployee') }} onDelete={handleDeleteEmployee} onHistory={e => { setHistoryEmployee(e); setModal('employeeHistory') }} />}
-        {page === 'payroll'   && <DashboardPage employees={employees} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
-        {page === 'reports'   && <ReportsPage employees={employees} employer={employer} />}
-        {page === 'settings'  && <SettingsPage employer={employer} onSave={e => { saveEmployer(e); setEmployer(e) }} />}
+        {page === 'dashboard' && <DashboardPage employees={employees} payroll={payroll} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
+        {page === 'employees' && <EmployeesPage employees={employees} payroll={payroll} onAdd={() => { setEditEmployee(undefined); setModal('addEmployee') }} onEdit={e => { setEditEmployee(e); setModal('editEmployee') }} onDelete={handleDeleteEmployee} onHistory={e => { setHistoryEmployee(e); setModal('employeeHistory') }} />}
+        {page === 'payroll'   && <DashboardPage employees={employees} payroll={payroll} onRunPayroll={() => setModal('runPayroll')} onGoToEmployees={goToEmployees} onDeletePayroll={handleDeletePayroll} />}
+        {page === 'reports'   && <ReportsPage employees={employees} employer={employer} payroll={payroll} />}
+        {page === 'settings'  && <SettingsPage employer={employer} onSave={handleSaveEmployer} />}
       </main>
 
       <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(15,23,42,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', zIndex: 40 }}>
