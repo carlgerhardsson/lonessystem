@@ -22,11 +22,7 @@
 * { -webkit-tap-highlight-color: transparent; }
 
 /*
-  iOS-fix: Lås html + body helt.
-  Utan detta kan iOS scrolla dokumentet horisontellt när tangentbordet
-  öppnas i en position:fixed modal — och lämna kvar offsetten efteråt.
-  Med position:fixed + overflow:hidden på #root finns det inget dokument
-  att scrolla, oavsett vad iOS försöker göra.
+  iOS-fix: Lås html + body helt så inget horisontellt scroll kan uppstå.
 */
 html, body {
   position: fixed;
@@ -47,6 +43,27 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: var(--navy);
+}
+
+/*
+  iOS AUTO-ZOOM FIX — KRITISK
+  iOS Safari zoomar automatiskt in sidan när ett input-fält fokuseras
+  om font-size är under 16px. Det gör att hela sidan "växer" åt höger
+  och förblir förskjuten efter att tangentbordet stängs.
+  Lösning: tvinga ALLA input, select och textarea till minst 16px.
+  Texten kan fortfarande se liten ut visuellt via transform:scale,
+  men iOS triggar inte zoom när font-size >= 16px.
+*/
+input,
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="tel"],
+input[type="date"],
+input[type="search"],
+select,
+textarea {
+  font-size: 16px !important;
 }
 
 /* Mjuk scroll för iPhone */
