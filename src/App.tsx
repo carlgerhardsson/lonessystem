@@ -1,6 +1,7 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Rotfix: Ta bort useVisualViewport helt från ModalSheet.
-// Modalen använder nu bara position:fixed + inset:0 — stabil, ingen re-rendering vid tangentbord.
+// Fix: Använd savePayrollResultsForMonth (atomisk batch) istället för
+// Promise.all med savePayrollResultForMonth — eliminerar race condition
+// där en anställds lönespec försvann efter delete + ny lönekörning.
 
 import { useState, useEffect, useCallback } from 'react'
 import {
@@ -15,7 +16,7 @@ import {
 import {
   getEmployees, saveEmployee, deleteEmployee, generateId,
   getEmployer, saveEmployer,
-  savePayrollResultForMonth, deletePayrollResult,
+  savePayrollResultsForMonth, deletePayrollResult,
   getPayrollForEmployee,
   type Employer
 } from './store'
@@ -40,10 +41,6 @@ type Page = 'dashboard' | 'employees' | 'payroll' | 'reports' | 'settings'
 type Modal = 'addEmployee' | 'editEmployee' | 'runPayroll' | 'employeeHistory' | null
 
 // ─── MODAL-WRAPPER ────────────────────────────────────────────────────────────
-// Enkel, stabil modal utan viewport-tracking.
-// position:fixed + inset:0 täcker alltid hela skärmen — #root är redan fixed
-// så det finns inget horisontellt att scrolla till.
-// Inga event listeners → ingen re-rendering vid tangentbordshändelser → inget hoppande.
 
 function ModalSheet({ onBackdropClick, children }: {
   onBackdropClick?: () => void
@@ -70,7 +67,6 @@ function ModalSheet({ onBackdropClick, children }: {
           maxHeight: '92dvh',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
-          // Förhindra att iOS drar med sig containern horisontellt
           overflowX: 'hidden',
         } as React.CSSProperties}
         onClick={e => e.stopPropagation()}
@@ -389,7 +385,7 @@ function SettingsPage({ employer, onSave }: { employer: Employer | null; onSave:
           <div key={key} className="mb-4">
             <label className="text-xs text-slate-400 font-medium block mb-1.5">{label}</label>
             <input value={(form as any)[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder}
-              className="w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white text-sm placeholder-slate-600 focus:outline-none focus:border-blue-500/50" />
+              className="w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50" />
           </div>
         ))}
       </div>
@@ -443,7 +439,7 @@ function EmployeeModal({ employee, onSave, onClose }: {
             <input type={type} value={(form as any)[key]} placeholder={placeholder} autoFocus={autoFocus}
               onChange={e => setForm({ ...form, [key]: type === 'number' ? Number(e.target.value) : e.target.value })}
               inputMode={type === 'number' ? 'decimal' : undefined}
-              className="w-full rounded-xl px-4 py-3 text-white text-sm focus:outline-none"
+              className="w-full rounded-xl px-4 py-3 text-white focus:outline-none"
               style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }} />
           </div>
         ))}
@@ -518,7 +514,7 @@ function PayrollModal({ employees, onRun, onClose }: {
                       value={inp?.[key] ?? 0}
                       inputMode="decimal"
                       onChange={e => setInput(emp.id, key, Number(e.target.value))}
-                      className="w-full rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none"
+                      className="w-full rounded-lg px-3 py-2.5 text-white focus:outline-none"
                       style={{ backgroundColor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}
                     />
                   </div>
@@ -576,9 +572,13 @@ export default function App() {
 
   const handleRunPayroll = async (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
-    await Promise.all(employees.map(emp =>
-      savePayrollResultForMonth(calculateMonthlyPayroll(emp, inputs[emp.id], month))
-    ))
+    // Beräkna alla resultat synkront, spara sedan atomiskt i ett enda anrop.
+    // Tidigare användes Promise.all som skapade en race condition där
+    // en anställds lönespec försvann efter delete + ny lönekörning.
+    const results = employees.map(emp =>
+      calculateMonthlyPayroll(emp, inputs[emp.id], month)
+    )
+    await savePayrollResultsForMonth(results)
     closeModal()
     await reload()
     setPage('dashboard')
