@@ -14,8 +14,6 @@ const KEYS = {
 } as const
 
 // ─── KRYPTERING (AES-GCM via Web Crypto API) ──────────────────────────────────
-// crypto.subtle kräver säker kontext (HTTPS/localhost).
-// I testmiljö (Vitest/jsdom) saknas subtle — vi faller tillbaka till klartext.
 
 const hasCrypto = (): boolean =>
   typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined'
@@ -33,7 +31,7 @@ const getOrCreateKey = async (): Promise<CryptoKey> => {
 }
 
 const encryptData = async (data: string): Promise<string> => {
-  if (!hasCrypto()) return data  // Testmiljö: lagra som klartext
+  if (!hasCrypto()) return data
   const key = await getOrCreateKey()
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const encoded = new TextEncoder().encode(data)
@@ -45,10 +43,9 @@ const encryptData = async (data: string): Promise<string> => {
 }
 
 const decryptData = async (raw: string): Promise<string> => {
-  // Okrypterat (testmiljö eller äldre data)
   if (!raw.startsWith('__enc__')) return raw
   if (!hasCrypto()) return raw
-  const encoded = raw.slice(7) // ta bort '__enc__'-prefix
+  const encoded = raw.slice(7)
   const key = await getOrCreateKey()
   const combined = Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
   const iv = combined.slice(0, 12)
@@ -120,6 +117,9 @@ export const savePayrollResult = async (result: PayrollResult): Promise<void> =>
   await store(KEYS.PAYROLL, history)
 }
 
+// Sparar ett enskilt resultat — ersätter om samma anställd+månad redan finns.
+// OBS: Använd savePayrollResultsForMonth (plural) vid lönekörning för
+// flera anställda — annars uppstår race condition med Promise.all.
 export const savePayrollResultForMonth = async (result: PayrollResult): Promise<void> => {
   const history = await getPayrollHistory()
   const idx = history.findIndex(
@@ -127,6 +127,29 @@ export const savePayrollResultForMonth = async (result: PayrollResult): Promise<
   )
   if (idx >= 0) history[idx] = result
   else history.push(result)
+  await store(KEYS.PAYROLL, history)
+}
+
+// ─── ATOMISK BATCH-SPARNING ───────────────────────────────────────────────────
+// Sparar ALLA anställdas löneresultat för en månad i ett enda localStorage-anrop.
+//
+// Varför detta behövs:
+//   Promise.all([save(emp1), save(emp2)]) är en race condition —
+//   båda läser samma lista, båda lägger till sin rad, den sista skrivningen
+//   vinner och den andras resultat försvinner. Det är exakt buggen där
+//   lönespecen inte dök upp efter delete + ny lönekörning.
+//
+// Lösning: läs listan EN gång, applicera alla ändringar, skriv EN gång.
+export const savePayrollResultsForMonth = async (results: PayrollResult[]): Promise<void> => {
+  if (results.length === 0) return
+  const history = await getPayrollHistory()
+  for (const result of results) {
+    const idx = history.findIndex(
+      r => r.employeeId === result.employeeId && r.month === result.month
+    )
+    if (idx >= 0) history[idx] = result
+    else history.push(result)
+  }
   await store(KEYS.PAYROLL, history)
 }
 
