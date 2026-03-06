@@ -1,13 +1,12 @@
 // 🎨 FRONTEND AGENT — Lönesystem App
-// Fix: Använd savePayrollResultsForMonth (atomisk batch) istället för
-// Promise.all med savePayrollResultForMonth — eliminerar race condition
-// där en anställds lönespec försvann efter delete + ny lönekörning.
+// Feature: Stale-varning på dashboard när anställds lön ändrats sedan senaste lönekörning.
+// Historiska specs påverkas aldrig — bara innevarande månad markeras som inaktuell.
 
 import { useState, useEffect, useCallback } from 'react'
 import {
   Users, Calculator, FileText, Settings, Plus, ChevronRight,
   TrendingUp, AlertCircle, CheckCircle, Download, Trash2, Edit3, X,
-  History
+  History, RefreshCw
 } from 'lucide-react'
 import {
   calculateActualSalary, calculateMonthlyPayroll,
@@ -158,7 +157,12 @@ function EmployeeHistoryModal({ employee, onClose }: { employee: Employee; onClo
               {[...history].reverse().map(r => (
                 <div key={r.month} className="p-4">
                   <div className="flex justify-between items-start mb-2">
-                    <p className="text-white font-semibold text-sm capitalize">{formatMonth(r.month)}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-white font-semibold text-sm capitalize">{formatMonth(r.month)}</p>
+                      {r.stale && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-md">Inaktuell</span>
+                      )}
+                    </div>
                     <p className="text-emerald-400 font-bold text-sm">{kr(r.netSalary)}</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -188,6 +192,7 @@ function DashboardPage({ employees, payroll, onRunPayroll, onGoToEmployees, onDe
 }) {
   const month = currentMonth()
   const results = payroll.filter(r => r.month === month)
+  const staleResults = results.filter(r => r.stale)
   const totalGross = results.reduce((s, r) => s + r.grossSalary, 0)
   const totalNet   = results.reduce((s, r) => s + r.netSalary, 0)
   const totalCost  = results.reduce((s, r) => s + r.grossSalary + r.employerFee, 0)
@@ -199,12 +204,35 @@ function DashboardPage({ employees, payroll, onRunPayroll, onGoToEmployees, onDe
         <h1 className="text-2xl font-bold text-white mt-1" style={{ fontFamily: 'Syne, sans-serif' }}>Översikt</h1>
         <p className="text-slate-400 text-sm">{new Date().toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}</p>
       </div>
+
+      {/* ── STALE-VARNING ── visas bara när lönen ändrats sedan senaste körning */}
+      {staleResults.length > 0 && (
+        <button
+          onClick={onRunPayroll}
+          className="w-full mb-4 p-4 rounded-2xl flex items-start gap-3 text-left"
+          style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}
+        >
+          <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-amber-300 font-semibold text-sm">Lönespecen är inaktuell</p>
+            <p className="text-amber-400/70 text-xs mt-0.5">
+              {staleResults.map(r => employees.find(e => e.id === r.employeeId)?.name ?? r.employeeId).join(', ')} — lönen har ändrats sedan senaste körning
+            </p>
+          </div>
+          <div className="flex items-center gap-1 text-amber-400 flex-shrink-0">
+            <RefreshCw size={13} />
+            <span className="text-xs font-semibold">Kör om</span>
+          </div>
+        </button>
+      )}
+
       <div className="grid grid-cols-2 gap-3 mb-4">
         <StatCard label="Anställda"     value={String(employees.length)} sub="aktiva" />
         <StatCard label="Bruttolön"     value={results.length ? kr(totalGross) : '—'} color="blue" />
         <StatCard label="Nettolön"      value={results.length ? kr(totalNet)   : '—'} color="green" />
         <StatCard label="Total kostnad" value={results.length ? kr(totalCost)  : '—'} color="amber" sub="inkl. avg." />
       </div>
+
       {employees.length === 0 ? (
         <button onClick={onGoToEmployees} className="w-full glass-card border-blue-500/30 bg-blue-500/10 py-5 px-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -232,11 +260,16 @@ function DashboardPage({ employees, payroll, onRunPayroll, onGoToEmployees, onDe
                 return (
                   <div key={r.employeeId} className="flex justify-between items-center py-3 border-b border-slate-700/50 last:border-0">
                     <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">{emp?.name ?? r.employeeId}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-white text-sm font-medium truncate">{emp?.name ?? r.employeeId}</p>
+                        {r.stale && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">Inaktuell</span>
+                        )}
+                      </div>
                       <p className="text-slate-400 text-xs">Brutto: {kr(r.grossSalary)}</p>
                     </div>
                     <div className="text-right mx-3">
-                      <p className="text-emerald-400 font-semibold text-sm">{kr(r.netSalary)}</p>
+                      <p className={`font-semibold text-sm ${r.stale ? 'text-amber-400/60' : 'text-emerald-400'}`}>{kr(r.netSalary)}</p>
                       <p className="text-slate-500 text-xs">Netto</p>
                     </div>
                     <button onClick={() => { if (window.confirm(`Ta bort lönespec för ${emp?.name ?? r.employeeId}?`)) onDeletePayroll(r.employeeId, r.month) }}
@@ -262,6 +295,7 @@ function EmployeesPage({ employees, payroll, onAdd, onEdit, onDelete, onHistory 
   onAdd: () => void; onEdit: (e: Employee) => void
   onDelete: (id: string) => void; onHistory: (e: Employee) => void
 }) {
+  const month = currentMonth()
   return (
     <div className="overflow-y-auto h-full px-4 pb-28" style={{ WebkitOverflowScrolling: 'touch' }}>
       <div className="pt-14 pb-4 flex justify-between items-end">
@@ -285,14 +319,20 @@ function EmployeesPage({ employees, payroll, onAdd, onEdit, onDelete, onHistory 
         <div className="space-y-3">
           {employees.map(emp => {
             const historyCount = payroll.filter(r => r.employeeId === emp.id).length
+            const isStaleThisMonth = payroll.some(r => r.employeeId === emp.id && r.month === month && r.stale)
             return (
-              <div key={emp.id} className="glass-card p-4">
+              <div key={emp.id} className={`glass-card p-4 ${isStaleThisMonth ? 'border-amber-500/20' : ''}`}>
                 <button onClick={() => onHistory(emp)} style={{ WebkitTapHighlightColor: 'transparent' }} className="w-full flex items-center gap-3 text-left">
                   <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500/40 to-indigo-600/40 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold text-sm">{emp.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-white font-semibold text-sm">{emp.name}</p>
+                      {isStaleThisMonth && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-md">Inaktuell spec</span>
+                      )}
+                    </div>
                     <p className="text-slate-400 text-xs">{kr(calculateActualSalary(emp.baseSalary, emp.employmentDegree))}/mån · {Math.round(emp.employmentDegree * 100)}%</p>
                   </div>
                   {historyCount > 0 && (
@@ -321,6 +361,7 @@ function EmployeesPage({ employees, payroll, onAdd, onEdit, onDelete, onHistory 
 function ReportsPage({ employees, employer, payroll }: { employees: Employee[]; employer: Employer | null; payroll: PayrollResult[] }) {
   const month = currentMonth()
   const results = payroll.filter(r => r.month === month)
+  const hasStale = results.some(r => r.stale)
   const handleDownload = (type: 'agi' | 'pain' | 'sie') => {
     if (!employer) { alert('Ange arbetsgivaruppgifter i Inställningar'); return }
     if (results.length === 0) { alert('Kör lön för månaden först'); return }
@@ -345,6 +386,12 @@ function ReportsPage({ employees, employer, payroll }: { employees: Employee[]; 
         <div className="glass-card p-4 mb-4 flex gap-3 border-amber-500/20 bg-amber-500/5">
           <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
           <p className="text-amber-300 text-sm">Kör lön för perioden för att aktivera export</p>
+        </div>
+      )}
+      {hasStale && (
+        <div className="glass-card p-4 mb-4 flex gap-3 border-amber-500/20 bg-amber-500/5">
+          <AlertCircle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-amber-300 text-sm">Lönespecen är inaktuell — kör om lön innan du exporterar</p>
         </div>
       )}
       <div className="space-y-3">
@@ -560,21 +607,18 @@ export default function App() {
 
   const handleSaveEmployee = async (emp: Employee) => {
     await saveEmployee(emp)
-    setEmployees(await getEmployees())
+    await reload() // reload för att visa stale-flagga direkt
   }
 
   const handleDeleteEmployee = async (id: string) => {
     if (window.confirm('Ta bort anställd?')) {
       await deleteEmployee(id)
-      setEmployees(await getEmployees())
+      await reload()
     }
   }
 
   const handleRunPayroll = async (inputs: Record<string, MonthlyInput>) => {
     const month = currentMonth()
-    // Beräkna alla resultat synkront, spara sedan atomiskt i ett enda anrop.
-    // Tidigare användes Promise.all som skapade en race condition där
-    // en anställds lönespec försvann efter delete + ny lönekörning.
     const results = employees.map(emp =>
       calculateMonthlyPayroll(emp, inputs[emp.id], month)
     )

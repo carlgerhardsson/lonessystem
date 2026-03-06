@@ -70,6 +70,13 @@ const load = async <T>(key: string, fallback: T): Promise<T> => {
   }
 }
 
+// ─── HJÄLPFUNKTION: INNEVARANDE MÅNAD ────────────────────────────────────────
+
+const currentMonth = (): string => {
+  const d = new Date()
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 // ─── ARBETSGIVARE ─────────────────────────────────────────────────────────────
 
 export interface Employer {
@@ -90,12 +97,37 @@ export const saveEmployer = async (employer: Employer): Promise<void> =>
 export const getEmployees = async (): Promise<Employee[]> =>
   load<Employee[]>(KEYS.EMPLOYEES, [])
 
+// Sparar anställd och märker innevarande månads lönespec som stale
+// om lönen eller sysselsättningsgraden har förändrats.
+// Historiska månader påverkas aldrig — de är skrivskyddade.
 export const saveEmployee = async (employee: Employee): Promise<void> => {
   const employees = await getEmployees()
   const idx = employees.findIndex(e => e.id === employee.id)
+  const existing = idx >= 0 ? employees[idx] : null
+
+  // Uppdatera anställdlistan
   if (idx >= 0) employees[idx] = employee
   else employees.push(employee)
   await store(KEYS.EMPLOYEES, employees)
+
+  // Kolla om lönen/sysselsättningsgraden faktiskt ändrats
+  const salaryChanged = existing !== null && (
+    existing.baseSalary !== employee.baseSalary ||
+    existing.employmentDegree !== employee.employmentDegree
+  )
+
+  if (!salaryChanged) return
+
+  // Märk innevarande månads spec som stale (historik rörs ej)
+  const month = currentMonth()
+  const history = await getPayrollHistory()
+  const specIdx = history.findIndex(
+    r => r.employeeId === employee.id && r.month === month
+  )
+  if (specIdx >= 0) {
+    history[specIdx] = { ...history[specIdx], stale: true }
+    await store(KEYS.PAYROLL, history)
+  }
 }
 
 export const deleteEmployee = async (id: string): Promise<void> => {
@@ -131,15 +163,8 @@ export const savePayrollResultForMonth = async (result: PayrollResult): Promise<
 }
 
 // ─── ATOMISK BATCH-SPARNING ───────────────────────────────────────────────────
-// Sparar ALLA anställdas löneresultat för en månad i ett enda localStorage-anrop.
-//
-// Varför detta behövs:
-//   Promise.all([save(emp1), save(emp2)]) är en race condition —
-//   båda läser samma lista, båda lägger till sin rad, den sista skrivningen
-//   vinner och den andras resultat försvinner. Det är exakt buggen där
-//   lönespecen inte dök upp efter delete + ny lönekörning.
-//
-// Lösning: läs listan EN gång, applicera alla ändringar, skriv EN gång.
+// Sparar ALLA anställdas löneresultat i ett enda localStorage-anrop.
+// Rensar automatiskt stale-flaggan — ny lönekörning gör alltid specs färska.
 export const savePayrollResultsForMonth = async (results: PayrollResult[]): Promise<void> => {
   if (results.length === 0) return
   const history = await getPayrollHistory()
@@ -147,8 +172,10 @@ export const savePayrollResultsForMonth = async (results: PayrollResult[]): Prom
     const idx = history.findIndex(
       r => r.employeeId === result.employeeId && r.month === result.month
     )
-    if (idx >= 0) history[idx] = result
-    else history.push(result)
+    // Ny lönekörning rensar alltid stale-flaggan
+    const fresh = { ...result, stale: false }
+    if (idx >= 0) history[idx] = fresh
+    else history.push(fresh)
   }
   await store(KEYS.PAYROLL, history)
 }
