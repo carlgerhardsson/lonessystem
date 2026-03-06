@@ -32,6 +32,10 @@ export interface PayrollResult {
   netSalary: number
   employerFee: number
   itp1: number
+  // Sätts till true när den anställdes lön uppdateras efter att lönespec skapats.
+  // Innebär att lönekörningen behöver göras om för innevarande månad.
+  // Rensas automatiskt när ny lönekörning sparas.
+  stale?: boolean
 }
 
 // ─── MODUL 1: GRUNDLÖN ──────────────────────────────────────────────────────
@@ -56,15 +60,10 @@ export function calculateSickLeave(
   sickHours: number,
   isFirstDayOfPeriod: boolean
 ): SickLeaveResult {
-  // Formel: (actual_salary * 12) / (52 * weekly_hours)
   const hourlyDeduction = (actualSalary * 12) / (52 * weeklyHours)
   const hourlySickPay = hourlyDeduction * 0.8
-
-  // Total sjuklön för sjukperioden
   const totalSickPay = hourlySickPay * sickHours
 
-  // Karensavdrag: sjuklön per timme * veckotimmar * 0.20
-  // Dras EN gång per sjukperiod — kan aldrig överstiga utbetald sjuklön
   let karensDeduction = 0
   if (isFirstDayOfPeriod) {
     const rawKarens = hourlySickPay * weeklyHours * 0.20
@@ -74,13 +73,7 @@ export function calculateSickLeave(
   const totalDeduction = hourlyDeduction * sickHours
   const netEffect = -(totalDeduction) + totalSickPay - karensDeduction
 
-  return {
-    hourlyDeduction,
-    hourlySickPay,
-    karensDeduction,
-    totalSickPay,
-    netEffect,
-  }
+  return { hourlyDeduction, hourlySickPay, karensDeduction, totalSickPay, netEffect }
 }
 
 // ─── MODUL 3: ÖVERTID OCH MERTID ────────────────────────────────────────────
@@ -94,18 +87,18 @@ export function calculateOvertime(
 ): number {
   if (!eligible) return 0
   switch (type) {
-    case 'extra':     return actualSalary / 175  // Mertid (deltid → heltid)
-    case 'overtime1': return actualSalary / 94   // Övertid 1 (vardag 06–20)
-    case 'overtime2': return actualSalary / 72   // Övertid 2 (kväll/helg)
+    case 'extra':     return actualSalary / 175
+    case 'overtime1': return actualSalary / 94
+    case 'overtime2': return actualSalary / 72
   }
 }
 
 // ─── MODUL 4: SEMESTER ───────────────────────────────────────────────────────
 
 export interface VacationResult {
-  dailyAllowance: number     // Per semesterdag: actual_salary * 0.008
-  totalAllowance: number     // Totalt tillägg för uttagna dagar
-  terminationPay: number     // Semesterersättning vid avslut (12% av årsbrutto)
+  dailyAllowance: number
+  totalAllowance: number
+  terminationPay: number
 }
 
 export function calculateVacation(
@@ -116,14 +109,11 @@ export function calculateVacation(
   const dailyAllowance = actualSalary * 0.008
   const totalAllowance = dailyAllowance * vacationDaysTaken
   const terminationPay = annualGross * 0.12
-
   return { dailyAllowance, totalAllowance, terminationPay }
 }
 
 // ─── MODUL 5: SKATT (TABELL 33, 2026) ────────────────────────────────────────
 
-// Skatteverkets tabell 33 — approximation baserad på kommunalskatt ~30%
-// OBS: Produktionskod bör använda exakt Skatteverket-tabell
 const TAX_TABLE_33: [number, number][] = [
   [0,      0],
   [11000,  0],
@@ -144,20 +134,16 @@ const TAX_TABLE_33: [number, number][] = [
 ]
 
 export function calculateTax(grossSalary: number): number {
-  // Hitta närmaste bracket
   for (let i = TAX_TABLE_33.length - 1; i >= 0; i--) {
     if (grossSalary >= TAX_TABLE_33[i][0]) {
       const baseTax = TAX_TABLE_33[i][1]
       const baseAmount = TAX_TABLE_33[i][0]
       const nextBracket = TAX_TABLE_33[i + 1]
       if (!nextBracket) return Math.floor(baseTax)
-
-      // Interpolera inom bracket
       const bracketRange = nextBracket[0] - baseAmount
       const taxRange = nextBracket[1] - baseTax
       const marginalRate = taxRange / bracketRange
       const extraTax = (grossSalary - baseAmount) * marginalRate
-
       return Math.floor(baseTax + extraTax)
     }
   }
@@ -172,26 +158,24 @@ export function calculateEmployerFee(grossSalary: number): number {
 
 // ─── MODUL 6: PENSION ITP 1 ──────────────────────────────────────────────────
 
-const ITP1_THRESHOLD = 50000  // 7.5 IBB / 12 ≈ 50 000 SEK (2026)
+const ITP1_THRESHOLD = 50000
 
 export function calculateITP1(grossSalary: number): number {
-  if (grossSalary <= ITP1_THRESHOLD) {
-    return grossSalary * 0.045  // Nivå 1: 4.5%
-  }
+  if (grossSalary <= ITP1_THRESHOLD) return grossSalary * 0.045
   const level1 = ITP1_THRESHOLD * 0.045
-  const level2 = (grossSalary - ITP1_THRESHOLD) * 0.30  // Nivå 2: 30%
+  const level2 = (grossSalary - ITP1_THRESHOLD) * 0.30
   return level1 + level2
 }
 
 // ─── KOMPLETT LÖNEBERÄKNING ───────────────────────────────────────────────────
 
 export interface MonthlyInput {
-  sickHoursDay1: number       // Sjukfrånvaro dag 1 (karens)
-  sickHoursOther: number      // Sjukfrånvaro övriga dagar
-  overtimeHours1: number      // Övertidstimmar (vardag)
-  overtimeHours2: number      // Övertidstimmar (kväll/helg)
-  extraHours: number          // Mertidstimmar (deltid)
-  vacationDays: number        // Semesterdagar
+  sickHoursDay1: number
+  sickHoursOther: number
+  overtimeHours1: number
+  overtimeHours2: number
+  extraHours: number
+  vacationDays: number
 }
 
 export function calculateMonthlyPayroll(
@@ -201,13 +185,9 @@ export function calculateMonthlyPayroll(
 ): PayrollResult {
   const actualSalary = calculateActualSalary(employee.baseSalary, employee.employmentDegree)
 
-  // Sjuklön
-  const sick1 = employee.overtimeEligible || true
-    ? calculateSickLeave(actualSalary, employee.weeklyHours, input.sickHoursDay1, true)
-    : { netEffect: 0, karensDeduction: 0, totalSickPay: 0 } as SickLeaveResult
+  const sick1 = calculateSickLeave(actualSalary, employee.weeklyHours, input.sickHoursDay1, true)
   const sickOther = calculateSickLeave(actualSalary, employee.weeklyHours, input.sickHoursOther, false)
 
-  // Övertid
   const overtimePay = employee.overtimeEligible
     ? (calculateOvertime(actualSalary, 'overtime1') * input.overtimeHours1 +
        calculateOvertime(actualSalary, 'overtime2') * input.overtimeHours2)
@@ -216,11 +196,9 @@ export function calculateMonthlyPayroll(
     ? calculateOvertime(actualSalary, 'extra') * input.extraHours
     : 0
 
-  // Semester
   const vacation = calculateVacation(actualSalary, input.vacationDays)
 
-  // Bruttolön
-  const sickDeduction = (sick1.hourlyDeduction ?? 0) * input.sickHoursDay1
+  const sickDeduction = sick1.hourlyDeduction * input.sickHoursDay1
   const grossSalary = actualSalary
     - sickDeduction
     + (sick1.totalSickPay - sick1.karensDeduction)
@@ -229,7 +207,6 @@ export function calculateMonthlyPayroll(
     + extraTimePay
     + vacation.totalAllowance
 
-  // Skatt & pension
   const incomeTax = calculateTax(grossSalary)
   const employerFee = calculateEmployerFee(grossSalary)
   const itp1 = calculateITP1(grossSalary)
@@ -251,5 +228,6 @@ export function calculateMonthlyPayroll(
     netSalary,
     employerFee: Math.round(employerFee * 100) / 100,
     itp1: Math.round(itp1 * 100) / 100,
+    stale: false,
   }
 }
