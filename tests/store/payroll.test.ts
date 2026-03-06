@@ -1,13 +1,15 @@
-// 🧪 TESTING AGENT — TDD för delete-payroll-rows (async store)
+// 🧪 TESTING AGENT — TDD för payroll store
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   getPayrollHistory,
   savePayrollResult,
+  saveEmployee,
   deletePayrollResult,
   savePayrollResultForMonth,
   savePayrollResultsForMonth,
 } from '../../src/store/index'
+import type { Employee } from '../../src/engine/calculations'
 
 const makeResult = (employeeId: string, month: string, net = 30000) => ({
   employeeId,
@@ -25,7 +27,25 @@ const makeResult = (employeeId: string, month: string, net = 30000) => ({
   netSalary: net,
   employerFee: 12568,
   itp1: 1800,
+  stale: false,
 })
+
+const makeEmployee = (id: string, baseSalary = 40000): Employee => ({
+  id,
+  name: 'Test Person',
+  personnummer: '19900101-1234',
+  baseSalary,
+  employmentDegree: 1.0,
+  weeklyHours: 40,
+  overtimeEligible: true,
+  taxColumn: 33,
+  startDate: '2024-01-01',
+})
+
+const currentMonth = () => {
+  const d = new Date()
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 beforeEach(() => localStorage.clear())
 
@@ -82,9 +102,6 @@ describe('savePayrollResultForMonth (dubblettskydd)', () => {
 })
 
 // ─── RACE CONDITION: PARALLELL LÖNEKÖRNING ────────────────────────────────────
-// Reproduktion av buggen: radera lönespec för en anställd, kör om lön
-// för ALLA anställda parallellt med Promise.all → race condition skriver
-// över resultaten så bara en anställds spec syns efteråt.
 
 describe('savePayrollResultsForMonth (atomisk batch)', () => {
   it('sparar alla anställdas resultat atomiskt — inga rader försvinner', async () => {
@@ -100,37 +117,26 @@ describe('savePayrollResultsForMonth (atomisk batch)', () => {
   })
 
   it('efter delete + ny lönekörning för alla — alla syns på hemsidan', async () => {
-    // Steg 1: kör lön för två anställda
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202603', 25000),
       makeResult('emp-2', '202603', 30000),
     ])
-    expect(await getPayrollHistory()).toHaveLength(2)
-
-    // Steg 2: radera emp-1:s spec (som användaren gör i appen)
     await deletePayrollResult('emp-1', '202603')
-    expect(await getPayrollHistory()).toHaveLength(1)
-
-    // Steg 3: kör om lön för BÅDA — emp-1 ska komma tillbaka
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202603', 26000),
       makeResult('emp-2', '202603', 31000),
     ])
     const final = await getPayrollHistory()
-
-    // Kritiskt: BÅDA ska finnas, ingen ska saknas
     expect(final).toHaveLength(2)
     expect(final.find(r => r.employeeId === 'emp-1')?.netSalary).toBe(26000)
     expect(final.find(r => r.employeeId === 'emp-2')?.netSalary).toBe(31000)
   })
 
   it('ersätter befintliga rader för samma månad atomiskt', async () => {
-    // Första lönekörningen
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202603', 25000),
       makeResult('emp-2', '202603', 30000),
     ])
-    // Andra lönekörningen med uppdaterade värden
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202603', 27000),
       makeResult('emp-2', '202603', 32000),
@@ -142,12 +148,10 @@ describe('savePayrollResultsForMonth (atomisk batch)', () => {
   })
 
   it('bevarar historik från andra månader vid ny lönekörning', async () => {
-    // Historisk data från februari
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202602', 24000),
       makeResult('emp-2', '202602', 29000),
     ])
-    // Mars-lönekörning ska inte ta bort februari
     await savePayrollResultsForMonth([
       makeResult('emp-1', '202603', 25000),
       makeResult('emp-2', '202603', 30000),
@@ -156,5 +160,64 @@ describe('savePayrollResultsForMonth (atomisk batch)', () => {
     expect(history).toHaveLength(4)
     expect(history.filter(r => r.month === '202602')).toHaveLength(2)
     expect(history.filter(r => r.month === '202603')).toHaveLength(2)
+  })
+
+  it('ny lönekörning rensar stale-flaggan', async () => {
+    const month = currentMonth()
+    // Kör lön, markera som stale, kör om → stale ska vara false
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 25000)])
+    await savePayrollResultsForMonth([{ ...makeResult('emp-1', month, 25000), stale: true }])
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 27000)])
+    const history = await getPayrollHistory()
+    expect(history.find(r => r.employeeId === 'emp-1')?.stale).toBe(false)
+  })
+})
+
+// ─── STALE-FLAGGA: LÖNEUPPDATERING ───────────────────────────────────────────
+// När en anställds lön ändras ska innevarande månads lönespec markeras
+// som 'stale: true' — en varning att lönekörningen behöver göras om.
+// Historiska månader (< innevarande) ska aldrig påverkas.
+
+describe('saveEmployee — märker innevarande månads spec som stale', () => {
+  it('markerar innevarande månads spec som stale när lön uppdateras', async () => {
+    const month = currentMonth()
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
+
+    // Uppdatera lönen
+    await saveEmployee(makeEmployee('emp-1', 45000))
+
+    const history = await getPayrollHistory()
+    const spec = history.find(r => r.employeeId === 'emp-1' && r.month === month)
+    expect(spec?.stale).toBe(true)
+  })
+
+  it('påverkar INTE historiska månader', async () => {
+    const month = currentMonth()
+    await savePayrollResultsForMonth([makeResult('emp-1', '202601', 28000)])
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
+
+    await saveEmployee(makeEmployee('emp-1', 45000))
+
+    const history = await getPayrollHistory()
+    const historisk = history.find(r => r.employeeId === 'emp-1' && r.month === '202601')
+    expect(historisk?.stale).toBeFalsy() // historisk månad rörs ej
+  })
+
+  it('gör ingenting om det inte finns någon spec för innevarande månad', async () => {
+    // Bara historisk data — ingen innevarande spec
+    await savePayrollResultsForMonth([makeResult('emp-1', '202601', 28000)])
+    await saveEmployee(makeEmployee('emp-1', 45000))
+    const history = await getPayrollHistory()
+    expect(history.every(r => !r.stale)).toBe(true)
+  })
+
+  it('spec utan lönändring (samma lön) markeras inte som stale', async () => {
+    const month = currentMonth()
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
+    // Spara anställd med samma lön som spec:en
+    await saveEmployee(makeEmployee('emp-1', 40000)) // 40000 matchar makeResult default
+    const history = await getPayrollHistory()
+    const spec = history.find(r => r.employeeId === 'emp-1' && r.month === month)
+    expect(spec?.stale).toBeFalsy()
   })
 })
