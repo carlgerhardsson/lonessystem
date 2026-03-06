@@ -164,7 +164,6 @@ describe('savePayrollResultsForMonth (atomisk batch)', () => {
 
   it('ny lönekörning rensar stale-flaggan', async () => {
     const month = currentMonth()
-    // Kör lön, markera som stale, kör om → stale ska vara false
     await savePayrollResultsForMonth([makeResult('emp-1', month, 25000)])
     await savePayrollResultsForMonth([{ ...makeResult('emp-1', month, 25000), stale: true }])
     await savePayrollResultsForMonth([makeResult('emp-1', month, 27000)])
@@ -177,13 +176,23 @@ describe('savePayrollResultsForMonth (atomisk batch)', () => {
 // När en anställds lön ändras ska innevarande månads lönespec markeras
 // som 'stale: true' — en varning att lönekörningen behöver göras om.
 // Historiska månader (< innevarande) ska aldrig påverkas.
+//
+// VIKTIGT: saveEmployee jämför ny lön mot befintlig lön i employees-store.
+// Testet måste därför:
+//   1. Spara anställd med URSPRUNGSLÖN (40 000)
+//   2. Spara lönespecen för innevarande månad
+//   3. Uppdatera anställd med NY LÖN (45 000)
+// Utan steg 1 finns ingen "existing" att jämföra med → salaryChanged = false.
 
 describe('saveEmployee — märker innevarande månads spec som stale', () => {
   it('markerar innevarande månads spec som stale när lön uppdateras', async () => {
     const month = currentMonth()
-    await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
 
-    // Uppdatera lönen
+    // Steg 1: Spara anställd med ursprungslön
+    await saveEmployee(makeEmployee('emp-1', 40000))
+    // Steg 2: Kör lön — spec skapas
+    await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
+    // Steg 3: Uppdatera till ny lön
     await saveEmployee(makeEmployee('emp-1', 45000))
 
     const history = await getPayrollHistory()
@@ -193,29 +202,42 @@ describe('saveEmployee — märker innevarande månads spec som stale', () => {
 
   it('påverkar INTE historiska månader', async () => {
     const month = currentMonth()
+
+    // Steg 1: Ursprungslön
+    await saveEmployee(makeEmployee('emp-1', 40000))
+    // Steg 2: Historisk spec + innevarande spec
     await savePayrollResultsForMonth([makeResult('emp-1', '202601', 28000)])
     await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
-
+    // Steg 3: Ny lön — bara innevarande ska märkas stale
     await saveEmployee(makeEmployee('emp-1', 45000))
 
     const history = await getPayrollHistory()
     const historisk = history.find(r => r.employeeId === 'emp-1' && r.month === '202601')
-    expect(historisk?.stale).toBeFalsy() // historisk månad rörs ej
+    expect(historisk?.stale).toBeFalsy()
   })
 
   it('gör ingenting om det inte finns någon spec för innevarande månad', async () => {
-    // Bara historisk data — ingen innevarande spec
+    // Steg 1: Ursprungslön
+    await saveEmployee(makeEmployee('emp-1', 40000))
+    // Steg 2: Bara historisk data — ingen innevarande spec
     await savePayrollResultsForMonth([makeResult('emp-1', '202601', 28000)])
+    // Steg 3: Ny lön — ingenting ska påverkas
     await saveEmployee(makeEmployee('emp-1', 45000))
+
     const history = await getPayrollHistory()
     expect(history.every(r => !r.stale)).toBe(true)
   })
 
-  it('spec utan lönändring (samma lön) markeras inte som stale', async () => {
+  it('spec utan löneändring (samma lön) markeras inte som stale', async () => {
     const month = currentMonth()
+
+    // Steg 1: Spara anställd med 40 000
+    await saveEmployee(makeEmployee('emp-1', 40000))
+    // Steg 2: Kör lön — spec skapas med baseSalary: 40000
     await savePayrollResultsForMonth([makeResult('emp-1', month, 30000)])
-    // Spara anställd med samma lön som spec:en
-    await saveEmployee(makeEmployee('emp-1', 40000)) // 40000 matchar makeResult default
+    // Steg 3: Spara om med SAMMA lön — ska INTE märkas stale
+    await saveEmployee(makeEmployee('emp-1', 40000))
+
     const history = await getPayrollHistory()
     const spec = history.find(r => r.employeeId === 'emp-1' && r.month === month)
     expect(spec?.stale).toBeFalsy()
