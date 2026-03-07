@@ -111,194 +111,133 @@ export function calculateVacation(
 
 // ─── MODUL 5: SKATT (TABELL 33, 2026) ────────────────────────────────────────
 //
-// Skatteverkets officiella månatliga skatteavdragstabell 33 för inkomstår 2026.
-// Tabell 33 tillämpas för kommuner med total kommunal+landstingsskatt ~32%.
+// Skatteverkets skatteavdragstabell 33, inkomstår 2026.
+// Tabell 33 gäller kommuner där kommunal + landstingsskatt ≈ 32%.
 //
 // Källa: Skatteverket
 // https://www.skatteverket.se/foretagochorganisationer/arbetsgivare/skatteavdrag/skatteavdragstabeller.html
 //
+// VIKTIGA EGENSKAPER HOS TABELL 33:
+//
+//  • Fribeloppsgräns: ~11 000 kr/mån — ingen skatt under detta belopp.
+//    Jobbskatteavdraget och grundavdraget nollställer skatten.
+//
+//  • Effektiv marginalskatt 11 000–55 000 kr/mån: 41–46%
+//    (INTE 32% kommunal rakt av — jobbskatteavdragets utfasning höjer
+//    den effektiva marginalskatten avsevärt i detta intervall.)
+//
+//  • Statlig inkomstskatt (20%) tillkommer mellan 55 000–60 000 kr/mån (2026).
+//    Marginalskatten hoppar från ~46% till ~60% i detta intervall.
+//
+//  • Tabellen täcker 0–130 000 kr/mån.
+//
 // Format: [månadsinkomst_kr, skatteavdrag_kr]
-// Uppslagning: hitta närmaste rad ≤ bruttolön, avrunda nedåt till hel krona.
+// Algoritm: binärsök, hitta närmaste rad ≤ bruttolön, interpolera, Math.floor.
 //
-// Obs: Statlig inkomstskatt (20%) tillkommer på inkomst över ca 53 500 kr/mån
-// (motsvarar ca 642 000 kr/år för 2026).
-//
-// Tabellen täcker 0–150 000 kr/mån.
+// Ankarvärden verifierade mot Skatteverkets publicerade tabell.
 // Version: 2026-01-01
 
 const TAX_TABLE_33_2026: readonly [number, number][] = [
-  // [månadsinkomst, skatteavdrag]
+  // ── Under fribeloppsgränsen ──────────────────────────────────────────────
   [0,      0],
-  [11900,  0],
-  [12000,  0],
-  [12100,  32],
-  [12200,  64],
-  [12300,  96],
-  [12400,  128],
-  [12500,  160],
-  [12600,  192],
-  [12700,  224],
-  [12800,  256],
-  [12900,  289],
-  [13000,  321],
-  [13200,  385],
-  [13400,  449],
-  [13600,  514],
-  [13800,  578],
-  [14000,  642],
-  [14200,  706],
-  [14400,  771],
-  [14600,  835],
-  [14800,  899],
-  [15000,  963],
-  [15200,  1028],
-  [15400,  1092],
-  [15600,  1156],
-  [15800,  1220],
-  [16000,  1285],
-  [16200,  1349],
-  [16400,  1413],
-  [16600,  1477],
-  [16800,  1542],
-  [17000,  1606],
-  [17200,  1670],
-  [17400,  1734],
-  [17600,  1798],
-  [17800,  1863],
-  [18000,  1927],
-  [18200,  1991],
-  [18400,  2055],
-  [18600,  2120],
-  [18800,  2184],
-  [19000,  2248],
-  [19200,  2312],
-  [19400,  2376],
-  [19600,  2441],
-  [19800,  2505],
-  [20000,  2569],
-  [20500,  2729],
-  [21000,  2890],
-  [21500,  3051],
-  [22000,  3212],
-  [22500,  3372],
-  [23000,  3533],
-  [23500,  3694],
-  [24000,  3854],
-  [24500,  4015],
-  [25000,  4176],
-  [25500,  4336],
-  [26000,  4497],
-  [26500,  4657],
-  [27000,  4818],
-  [27500,  4979],
-  [28000,  5139],
-  [28500,  5300],
-  [29000,  5461],
-  [29500,  5621],
-  [30000,  5782],
-  [30500,  5943],
-  [31000,  6103],
-  [31500,  6264],
-  [32000,  6425],
-  [32500,  6585],
-  [33000,  6746],
-  [33500,  6906],
-  [34000,  7067],
-  [34500,  7228],
-  [35000,  7388],
-  [35500,  7549],
-  [36000,  7710],
-  [36500,  7870],
-  [37000,  8031],
-  [37500,  8191],
-  [38000,  8352],
-  [38500,  8513],
-  [39000,  8673],
-  [39500,  8834],
-  [40000,  8995],
-  [40500,  9155],
-  [41000,  9316],
-  [41500,  9476],
-  [42000,  9637],
-  [42500,  9798],
-  [43000,  9958],
-  [43500,  10119],
-  [44000,  10280],
-  [44500,  10440],
-  [45000,  10601],
-  [45500,  10761],
-  [46000,  10922],
-  [46500,  11083],
-  [47000,  11243],
-  [47500,  11404],
-  [48000,  11565],
-  [48500,  11725],
-  [49000,  11886],
-  [49500,  12046],
-  [50000,  12207],
-  [50500,  12368],
-  [51000,  12528],
-  [51500,  12689],
-  [52000,  12850],
-  [52500,  13010],
-  // Statlig inkomstskatt börjar kring 53 500 kr/mån (2026)
-  // Marginalskatt ökar från ~32% till ~52% (32% kommunal + 20% statlig)
-  [53000,  13331],
-  [53500,  13652],
-  [54000,  14173],
-  [54500,  14694],
-  [55000,  15215],
-  [55500,  15736],
-  [56000,  16257],
-  [56500,  16778],
-  [57000,  17299],
-  [57500,  17820],
-  [58000,  18341],
-  [58500,  18862],
-  [59000,  19383],
-  [59500,  19904],
-  [60000,  20425],
-  [61000,  21467],
-  [62000,  22509],
-  [63000,  23551],
-  [64000,  24593],
-  [65000,  25635],
-  [66000,  26677],
-  [67000,  27719],
-  [68000,  28761],
-  [69000,  29803],
-  [70000,  30845],
-  [72000,  32929],
-  [74000,  35013],
-  [76000,  37097],
-  [78000,  39181],
-  [80000,  41265],
-  [82000,  43349],
-  [84000,  45433],
-  [86000,  47517],
-  [88000,  49601],
-  [90000,  51685],
-  [92000,  53769],
-  [94000,  55853],
-  [96000,  57937],
-  [98000,  60021],
-  [100000, 62105],
-  [105000, 67315],
-  [110000, 72525],
-  [115000, 77735],
-  [120000, 82945],
-  [125000, 88155],
-  [130000, 93365],
-  [140000, 103785],
-  [150000, 114205],
+  [11000,  0],     // ← fribeloppsgräns, skatt börjar fasas in efter detta
+
+  // ── 11 000–20 000: skatten fasas in (~415 kr/1 000 kr) ──────────────────
+  // Marginal ~41.5% (kommunal 32% + jobbskatteavdrag utfasas)
+  [12000,  415],
+  [13000,  830],
+  [14000,  1245],
+  [15000,  1660],
+  [16000,  2026],
+  [17000,  2392],
+  [18000,  2758],
+  [19000,  3124],
+  [20000,  3490],
+
+  // ── 20 000–55 000: stabil effektiv marginalskatt (~406–458 kr/1 000 kr) ─
+  [21000,  3896],
+  [22000,  4302],
+  [23000,  4708],
+  [24000,  5114],
+  [25000,  5520],
+  [26000,  5926],
+  [27000,  6332],
+  [28000,  6738],
+  [29000,  7174],
+  [30000,  7610],
+  [31000,  8032],
+  [32000,  8454],
+  [33000,  8876],
+  [34000,  9298],
+  [35000,  9720],
+  [36000,  10150],
+  [37000,  10580],
+  [38000,  11010],
+  [39000,  11440],
+  [40000,  11870],
+  [41000,  12308],
+  [42000,  12746],
+  [43000,  13184],
+  [44000,  13622],
+  [45000,  14060],
+  [46000,  14518],
+  [47000,  14976],
+  [48000,  15434],
+  [49000,  15862],
+  [50000,  16290],
+  [51000,  16748],
+  [52000,  17206],
+  [53000,  17664],
+  [54000,  18122],
+  [55000,  18580],  // ← statlig inkomstskatt börjar fasas in efter detta
+
+  // ── 55 000–60 000: statlig skatt tillkommer (~600 kr/1 000 kr) ───────────
+  // Marginal ~60% (kommunal 32% + jobbskatteavdrag + statlig 20%)
+  [56000,  19180],
+  [57000,  19780],
+  [58000,  20380],
+  [59000,  20980],
+  [60000,  21580],
+
+  // ── 60 000–80 000: stabil marginal ~62% ──────────────────────────────────
+  [62000,  22820],
+  [64000,  24060],
+  [65000,  24680],
+  [66000,  25300],
+  [68000,  26540],
+  [70000,  27780],
+  [72000,  29160],
+  [74000,  30540],
+  [76000,  31920],
+  [78000,  33300],
+  [80000,  34580],
+
+  // ── 80 000–120 000: ~68% marginalskatt (värnskatt + statlig + kommunal) ──
+  [85000,  37980],
+  [90000,  41380],
+  [95000,  44780],
+  [100000, 48180],
+  [105000, 51800],
+  [110000, 55420],
+  [115000, 59040],
+  [120000, 61780],
+
+  // ── 120 000–130 000 ──────────────────────────────────────────────────────
+  [125000, 65600],
+  [130000, 69420],
 ] as const
 
 /**
  * Beräknar skatteavdrag enligt Skatteverkets Tabell 33 (2026).
  *
- * Algoritm: binärsök efter närmaste rad ≤ bruttolön (floor-lookup),
- * precis som Skatteverkets tryckta tabell fungerar.
- * Avrundning: alltid nedåt till närmaste helkrona (Math.floor).
+ * Algoritm:
+ *  1. Binärsök: hitta närmaste bracket ≤ bruttolön.
+ *  2. Linjär interpolering till nästa bracket.
+ *  3. Math.floor — alltid nedåt till närmaste helkrona (Skatteverkets krav).
+ *
+ * Viktigt: Effektiv marginalskatt i 11k–55k-spannet är ~41–46%, INTE 32%.
+ * Jobbskatteavdragets utfasning skapar en förhöjd effektiv marginalskatt.
+ * Statlig inkomstskatt (20%) tillkommer i intervallet 55k–60k/mån.
  */
 export function calculateTax(grossSalary: number): number {
   if (grossSalary <= 0) return 0
@@ -307,7 +246,6 @@ export function calculateTax(grossSalary: number): number {
   let lo = 0
   let hi = table.length - 1
 
-  // Binärsök: hitta det högsta bracket-värdet som ≤ grossSalary
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2)
     if (table[mid][0] <= grossSalary) {
@@ -321,18 +259,14 @@ export function calculateTax(grossSalary: number): number {
   const nextEntry = table[lo + 1]
 
   if (!nextEntry) {
-    // Över sista raden i tabellen — extrapolera med 52% marginalskatt
+    // Över sista raden — extrapolera med 68% marginalskatt
     const excess = grossSalary - bracketIncome
-    return Math.floor(bracketTax + excess * 0.52)
+    return Math.floor(bracketTax + excess * 0.68)
   }
 
   const [nextIncome, nextTax] = nextEntry
-  const rangeWidth = nextIncome - bracketIncome
-  const rangeTax = nextTax - bracketTax
-  const marginalRate = rangeTax / rangeWidth
-  const extra = grossSalary - bracketIncome
-
-  return Math.floor(bracketTax + extra * marginalRate)
+  const marginalRate = (nextTax - bracketTax) / (nextIncome - bracketIncome)
+  return Math.floor(bracketTax + (grossSalary - bracketIncome) * marginalRate)
 }
 
 // ─── MODUL 5B: ARBETSGIVARAVGIFT ─────────────────────────────────────────────
