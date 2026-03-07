@@ -11,14 +11,17 @@
 
 Lägg till på iPhone: Safari → Dela → "Lägg till på hemskärmen"
 
-## 🤖 Agentteam-arkitektur
+## 🤖 Agentteam
 
-| Agent | Ansvar |
-|-------|--------|
-| 🎯 Orchestrator | Koordinerar, skapar issues & PRs |
-| ⚙️ Backend Agent | Löneberäkningsmotor (kalkyler, skatt, pension) |
+| Agent | Roll |
+|-------|------|
+| 🎯 Orchestrator Agent | Ledaren — tar emot uppgift, bryter ned, tilldelar, följer upp |
+| 📐 Backend Agent | Löneberäkningsmotor (kalkyler, skatt, pension) |
 | 🎨 Frontend Agent | React PWA UI (iPhone-optimerad) |
-| 🧪 Testing Agent | TDD — tester skrivs FÖRE koden |
+| 🧪 Testing Agent | Kvalitetsvakt — tester skrivs FÖRE koden (TDD) |
+| 🔀 Merge Agent | Grindvakt — mergar aldrig utan grönt CI + klartecken |
+
+> Se [AGENTS.md](./AGENTS.md) för fullständig beskrivning av roller och arbetsflöde.
 
 ## 📋 Funktioner
 
@@ -52,7 +55,7 @@ npm run build     # Bygg för produktion
 
 ```
 src/
-├── engine/         ← ⚙️ Backend Agent
+├── engine/         ← 📐 Backend Agent
 │   ├── calculations.ts   Alla löneberäkningar
 │   ├── taxTable.ts       Skatteverkets tabell 33
 │   └── exports.ts        AGI, PAIN.001, SIE4
