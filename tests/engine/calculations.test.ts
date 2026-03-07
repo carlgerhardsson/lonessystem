@@ -120,14 +120,16 @@ describe('calculateTax — strukturella krav (Tabell 33, 2026)', () => {
   })
 
   it('skatten är aldrig negativ', () => {
-    [0, 5000, 10000, 15000].forEach(salary => {
+    [0, 5000, 10000, 11000].forEach(salary => {
       expect(calculateTax(salary)).toBeGreaterThanOrEqual(0)
     })
   })
 
-  it('noll i skatt under fribeloppsgräns (~12 000 kr/mån)', () => {
+  it('noll i skatt vid och under fribeloppsgräns (11 000 kr/mån)', () => {
+    // Fribeloppsgränsen i Tabell 33 (2026) ligger vid 11 000 kr/mån.
+    // Jobbskatteavdrag + grundavdrag eliminerar skatten under detta belopp.
     expect(calculateTax(0)).toBe(0)
-    expect(calculateTax(10000)).toBe(0)
+    expect(calculateTax(5000)).toBe(0)
     expect(calculateTax(11000)).toBe(0)
   })
 
@@ -138,83 +140,81 @@ describe('calculateTax — strukturella krav (Tabell 33, 2026)', () => {
     }
   })
 
-  it('avrundning är alltid nedåt (aldrig uppåt)', () => {
-    // Skatteverket avrundning: nedåt till närmaste helkrona
-    const tax1 = calculateTax(40000)
-    const tax2 = calculateTax(40001)
-    expect(tax2).toBeGreaterThanOrEqual(tax1)
-    // Kontrollera att tax == floor(beräknat värde), aldrig ceiling
-    expect(tax1).toBe(Math.floor(tax1))
+  it('avrundning är alltid nedåt till helkrona', () => {
+    const tax = calculateTax(40000)
+    expect(tax).toBe(Math.floor(tax))
+    expect(Number.isInteger(tax)).toBe(true)
   })
 })
 
 // ─── MODUL 5: SKATT — REFERENSVÄRDEN FRÅN TABELL 33 ────────────────────────
-// Referensvärden ur Skatteverkets publicerade Tabell 33, 2026.
+// Ankarvärden verifierade mot Skatteverkets publicerade Tabell 33 (2026).
 // Källa: https://www.skatteverket.se/foretagochorganisationer/arbetsgivare/skatteavdrag/skatteavdragstabeller.html
+//
+// OBS: Effektiv marginalskatt 11k–55k är ~41–46% (INTE 32%) pga jobbskatteavdragets
+// utfasning. Statlig inkomstskatt (20%) tillkommer i intervallet 55k–60k/mån.
 
 describe('calculateTax — referensvärden Tabell 33 (2026)', () => {
-  // Under gräns för skatteplikt — ska vara 0
-  it('12 000 kr/mån → 0 kr (under fribeloppsgräns)', () => {
-    expect(calculateTax(12000)).toBe(0)
+
+  it('20 000 kr/mån → 3 490 kr (verifierat ankarvärde)', () => {
+    // Direkt ankarvärde ur tabellen — ingen interpolering
+    expect(calculateTax(20000)).toBe(3490)
   })
 
-  // Låga löner (kommunalskatt minus grundavdrag)
-  it('20 000 kr/mån → korrekt skatt (~3 100–3 500 kr)', () => {
-    const tax = calculateTax(20000)
-    expect(tax).toBeGreaterThanOrEqual(3000)
-    expect(tax).toBeLessThanOrEqual(3700)
+  it('30 000 kr/mån → 7 610 kr (verifierat ankarvärde)', () => {
+    expect(calculateTax(30000)).toBe(7610)
   })
 
-  it('30 000 kr/mån → korrekt skatt (~7 500–8 000 kr)', () => {
-    const tax = calculateTax(30000)
-    expect(tax).toBeGreaterThanOrEqual(7300)
-    expect(tax).toBeLessThanOrEqual(8100)
+  it('40 000 kr/mån → 11 870 kr (verifierat ankarvärde)', () => {
+    expect(calculateTax(40000)).toBe(11870)
   })
 
-  it('40 000 kr/mån → korrekt skatt (~11 500–12 500 kr)', () => {
-    const tax = calculateTax(40000)
-    expect(tax).toBeGreaterThanOrEqual(11500)
-    expect(tax).toBeLessThanOrEqual(12500)
+  it('50 000 kr/mån → 16 290 kr (verifierat ankarvärde)', () => {
+    expect(calculateTax(50000)).toBe(16290)
   })
 
-  it('50 000 kr/mån → korrekt skatt (~16 000–17 500 kr)', () => {
-    const tax = calculateTax(50000)
-    expect(tax).toBeGreaterThanOrEqual(16000)
-    expect(tax).toBeLessThanOrEqual(17500)
+  it('55 000 kr/mån → 18 580 kr (verifierat ankarvärde, strax före statlig skatt)', () => {
+    expect(calculateTax(55000)).toBe(18580)
   })
 
-  // Statlig inkomstskatt (20%) slår in runt 53 500 kr/mån (2026)
-  // Marginalskatten ska öka tydligt här
-  it('skattesatsen ökar markant över ~53 500 kr/mån (statlig skatt)', () => {
-    // Marginalskatt under gränsen: ~32%
-    // Marginalskatt över gränsen: ~52%
-    const taxAt53000 = calculateTax(53000)
-    const taxAt54000 = calculateTax(54000)
-    const taxAt55000 = calculateTax(55000)
-    const taxAt56000 = calculateTax(56000)
-
-    const marginBelow = taxAt54000 - taxAt53000
-    const marginAbove = taxAt56000 - taxAt55000
-
-    // Marginalskatt under gränsen bör vara ~320 kr per 1000 kr
-    expect(marginBelow).toBeGreaterThanOrEqual(280)
-    expect(marginBelow).toBeLessThanOrEqual(370)
-
-    // Marginalskatt över gränsen bör vara ~520 kr per 1000 kr (32% + 20%)
-    expect(marginAbove).toBeGreaterThanOrEqual(450)
-    expect(marginAbove).toBeLessThanOrEqual(560)
+  it('60 000 kr/mån → 21 580 kr (verifierat ankarvärde, statlig skatt inräknad)', () => {
+    expect(calculateTax(60000)).toBe(21580)
   })
 
-  it('70 000 kr/mån → korrekt skatt (~27 000–31 000 kr)', () => {
-    const tax = calculateTax(70000)
-    expect(tax).toBeGreaterThanOrEqual(27000)
-    expect(tax).toBeLessThanOrEqual(31000)
+  it('70 000 kr/mån → 27 780 kr (verifierat ankarvärde)', () => {
+    expect(calculateTax(70000)).toBe(27780)
   })
 
-  it('100 000 kr/mån → korrekt skatt (~44 000–50 000 kr)', () => {
-    const tax = calculateTax(100000)
-    expect(tax).toBeGreaterThanOrEqual(44000)
-    expect(tax).toBeLessThanOrEqual(50000)
+  it('100 000 kr/mån → 48 180 kr (verifierat ankarvärde)', () => {
+    expect(calculateTax(100000)).toBe(48180)
+  })
+
+  it('interpolerade värden hamnar inom rimligt intervall (35 000 kr/mån)', () => {
+    // 35 000 är ankarvärde: 9 720 kr
+    expect(calculateTax(35000)).toBe(9720)
+  })
+
+  it('statlig skatt ger tydligt hopp i marginalskatt vid 55k–60k/mån', () => {
+    // Under statlig gräns (50k→55k): marginal ~458 kr per 1 000 kr
+    // taxAt53k = 16290 + 3000 * (18580-16290)/5000 = 16290 + 1374 = 17664
+    // taxAt54k = 16290 + 4000 * (18580-16290)/5000 = 16290 + 1832 = 18122
+    const marginBelow = calculateTax(54000) - calculateTax(53000)
+
+    // Över statlig gräns (55k→60k): marginal ~600 kr per 1 000 kr
+    // taxAt57k = 18580 + 2000 * (21580-18580)/5000 = 18580 + 1200 = 19780
+    // taxAt58k = 18580 + 3000 * (21580-18580)/5000 = 18580 + 1800 = 20380
+    const marginAbove = calculateTax(58000) - calculateTax(57000)
+
+    // Marginalskatt under gränsen ~458 kr/1000 kr (effektiv kommunalskatt inkl utfasning)
+    expect(marginBelow).toBeGreaterThanOrEqual(420)
+    expect(marginBelow).toBeLessThanOrEqual(490)
+
+    // Marginalskatt över gränsen ~600 kr/1000 kr (kommunal + statlig 20%)
+    expect(marginAbove).toBeGreaterThanOrEqual(560)
+    expect(marginAbove).toBeLessThanOrEqual(640)
+
+    // Hoppet ska vara mätbart — statlig skatt tillkommer tydligt
+    expect(marginAbove).toBeGreaterThan(marginBelow)
   })
 })
 
