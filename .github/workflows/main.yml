@@ -61,6 +61,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true
       - name: Installera beroenden
         run: npm install
       - name: Kör alla tester
@@ -82,6 +83,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true
       - run: npm install
       - name: Bygg produktionsapp
         run: npm run build
@@ -103,6 +105,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true
       - run: npm install
       - run: npm audit --audit-level=high
         continue-on-error: true
@@ -120,6 +123,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true
       - run: npm install
       - run: npm run build
       - name: Deploya till GitHub Pages
