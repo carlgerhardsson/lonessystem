@@ -95,6 +95,21 @@ jobs:
           fi
           echo "✅ Bygget lyckades"
           ls -la dist/
+      - name: Verifiera PWA (installation och offline på iPhone)
+        run: |
+          fail=0
+          check() { if eval "$2"; then echo "✅ $1"; else echo "❌ $1"; fail=1; fi; }
+          check "service worker dist/sw.js finns"            '[ -f dist/sw.js ]'
+          check "manifest dist/manifest.webmanifest finns"   '[ -f dist/manifest.webmanifest ]'
+          check "manifest: start_url /lonessystem/"          'grep -q "\"start_url\":\"/lonessystem/\"" dist/manifest.webmanifest'
+          check "manifest: scope /lonessystem/"              'grep -q "\"scope\":\"/lonessystem/\"" dist/manifest.webmanifest'
+          check "manifest: display standalone"               'grep -q "\"display\":\"standalone\"" dist/manifest.webmanifest'
+          check "index.html länkar manifestet"               'grep -q "rel=\"manifest\" href=\"/lonessystem/manifest.webmanifest\"" dist/index.html'
+          check "index.html registrerar service worker"      'grep -q "registerSW" dist/index.html'
+          check "sw.js förcachar index.html"                 'grep -q "index.html" dist/sw.js'
+          check "sw.js förcachar JS-bundlen"                 'grep -qE "assets/index-[^\"]+\.js" dist/sw.js'
+          check "sw.js förcachar CSS"                        'grep -qE "assets/index-[^\"]+\.css" dist/sw.js'
+          exit $fail
 
   # ── 4. SÄKERHETSSKANNING ──────────────────────────────────────────────────
   security:
