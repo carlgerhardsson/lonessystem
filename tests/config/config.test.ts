@@ -3,8 +3,8 @@
 // LÄRDOMEN: Felaktiga konfigfiler kraschar bygget — fånga dem tidigt
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync, existsSync } from 'fs'
-import { resolve } from 'path'
+import { readFileSync, existsSync, readdirSync } from 'fs'
+import { resolve, join } from 'path'
 
 const root = resolve(process.cwd())
 
@@ -43,6 +43,33 @@ describe('package.json', () => {
   it('har react som dependency', () => expect(pkg.dependencies?.react).toBeTruthy())
   it('har vite som devDependency', () => expect(pkg.devDependencies?.vite).toBeTruthy())
   it('har vitest som devDependency', () => expect(pkg.devDependencies?.vitest).toBeTruthy())
+})
+
+// ─── INGA OANVÄNDA PRODUKTIONSBEROENDEN ───────────────────────────────────────
+// LÄRDOMEN: react-router-dom låg kvar oanvänt och drog in en sårbarhet i appen.
+// Varje paket i "dependencies" följer med till användarna — det ska användas.
+
+describe('Produktionsberoenden', () => {
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf-8'))
+
+  const sourceFiles = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) return sourceFiles(path)
+      return /\.(tsx?|jsx?|css)$/.test(entry.name) ? [path] : []
+    })
+
+  const allSource = sourceFiles(resolve(root, 'src'))
+    .map(file => readFileSync(file, 'utf-8'))
+    .join('\n')
+
+  Object.keys(pkg.dependencies ?? {}).forEach(dep => {
+    it(`${dep} används i src/`, () => {
+      const escaped = dep.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      const imported = new RegExp(`from\\s+['"]${escaped}(/[^'"]*)?['"]|import\\s+['"]${escaped}(/[^'"]*)?['"]`)
+      expect(imported.test(allSource)).toBe(true)
+    })
+  })
 })
 
 // ─── POSTCSS — fångar den ursprungliga buggen ─────────────────────────────────
